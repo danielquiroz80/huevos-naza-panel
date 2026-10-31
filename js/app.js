@@ -13,6 +13,7 @@ import { Negocio } from './pages/negocio.js';
 import { Entregas, MiRuta } from './pages/entregas.js';
 import { Repartidores } from './pages/repartidores.js';
 import { Reportes } from './pages/reportes.js';
+import { Consejos } from './pages/consejos.js';
 
 const TODAS = [
   { id: 'inicio', label: 'Inicio', icon: 'home', C: Inicio, roles: ['dueno'] },
@@ -21,6 +22,7 @@ const TODAS = [
   { id: 'ruta', label: 'Mis rutas', icon: 'route', C: MiRuta, roles: ['repartidor'] },
   { id: 'repartidores', label: 'Repartidores', icon: 'idcard', C: Repartidores, roles: ['dueno'] },
   { id: 'reportes', label: 'Reportes', icon: 'file', C: Reportes, roles: ['dueno'] },
+  { id: 'consejos', label: 'Consejos', icon: 'spark', C: Consejos, roles: ['dueno'] },
   { id: 'productos', label: 'Productos', icon: 'box', C: Productos, roles: ['dueno'] },
   { id: 'clientes', label: 'Clientes', icon: 'users', C: Clientes, roles: ['dueno'] },
   { id: 'compras', label: 'Compras', icon: 'cart', C: Compras, roles: ['dueno'] },

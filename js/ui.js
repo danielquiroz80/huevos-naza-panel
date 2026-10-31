@@ -113,8 +113,9 @@ export function Card({ title, icon, action, children, className = '', pad = true
   </section>`;
 }
 
-export function Kpi({ icon, label, value, sub, trend, tone = '' }) {
-  return html`<div class=${'kpi ' + tone}>
+export function Kpi({ icon, label, value, sub, trend, tone = '', onClick }) {
+  const Tag = onClick ? 'button' : 'div';
+  return html`<${Tag} class=${'kpi ' + tone + (onClick ? ' clic' : '')} onClick=${onClick} type=${onClick ? 'button' : null}>
     <div class="kpi-icon"><${Icon} n=${icon} size=${20} /></div>
     <div class="kpi-body">
       <span class="kpi-label">${label}</span>
@@ -123,7 +124,8 @@ export function Kpi({ icon, label, value, sub, trend, tone = '' }) {
         ${trend != null && html`<em class=${trend >= 0 ? 'up' : 'down'}><${Icon} n=${trend >= 0 ? 'up' : 'down'} size=${13} />${Math.abs(trend)}%</em>`}
         ${sub}</span>`}
     </div>
-  </div>`;
+    ${onClick && html`<span class="kpi-mas"><${Icon} n="chevron" size=${16} /></span>`}
+  <//>`;
 }
 
 export function Loader({ rows = 3 }) {

@@ -28,13 +28,8 @@ const cop = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP',
 const nf = new Intl.NumberFormat('es-CO');
 export const money = (n) => cop.format(Number(n) || 0);
 export const num = (n) => nf.format(Math.round((Number(n) || 0) * 10) / 10);
-export function moneyShort(n) {
-  n = Number(n) || 0;
-  const a = Math.abs(n);
-  if (a >= 1e6) return '$' + (n / 1e6).toFixed(1).replace(/\.0$/, '').replace('.', ',') + ' M';
-  if (a >= 1e3) return '$' + Math.round(n / 1e3) + ' mil';
-  return '$' + Math.round(n);
-}
+// Valores siempre completos (ej.: $ 382.000), sin abreviar.
+export const moneyShort = (n) => money(n);
 export function variacion(actual, anterior) {
   actual = Number(actual) || 0; anterior = Number(anterior) || 0;
   if (!anterior) return null;

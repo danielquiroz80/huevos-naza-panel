@@ -1,6 +1,6 @@
-import { html, useState, Icon, Card, Kpi, Bars, Loader, Empty, ErrorBox, Badge, useAsync } from '../ui.js';
+import { html, useState, Icon, Card, Kpi, Bars, Loader, Empty, ErrorBox, Badge, Modal, useAsync } from '../ui.js';
 import { sb, q, money, moneyShort, num, fecha, fechaLarga, fechaCorta, saludo, variacion, sum, ABIERTOS, hoyISO, groupBy } from '../lib.js';
-import { PedidoItem, PedidoDrawer } from './pedidos.js';
+import { PedidoItem, PedidoDrawer, EstadoBadge } from './pedidos.js';
 
 async function cargar() {
   const hoy = hoyISO();
@@ -19,6 +19,7 @@ async function cargar() {
 export function Inicio({ perfil }) {
   const r = useAsync(cargar, []);
   const [sel, setSel] = useState(null);
+  const [det, setDet] = useState(null);
   const d = r.data;
   const nombre = (perfil?.nombre || '').split(' ')[0];
 
@@ -63,10 +64,10 @@ export function Inicio({ perfil }) {
     </section>
 
     <div class="kpis">
-      <${Kpi} icon="wallet" label="Ventas esta semana" value=${moneyShort(actual.ventas)} trend=${variacion(actual.ventas, anterior.ventas)} sub="vs. semana anterior" />
-      <${Kpi} icon="pedidos" label="Pedidos abiertos" value=${num(d.abiertos.length)} sub=${num(sum(d.abiertos, 'canastas')) + ' canastas'} tone="blue" />
-      <${Kpi} icon="truck" label="Canastas por entregar" value=${num(canastasProx)} sub=${proxFecha ? 'desde ' + fechaCorta(proxFecha) : 'sin fecha'} tone="violet" />
-      <${Kpi} icon="clock" label="Por cobrar" value=${moneyShort(porCobrar)} sub="en pedidos abiertos" tone="red" />
+      <${Kpi} icon="wallet" label="Ventas esta semana" value=${moneyShort(actual.ventas)} trend=${variacion(actual.ventas, anterior.ventas)} sub="vs. semana anterior" onClick=${() => setDet('ventas')} />
+      <${Kpi} icon="pedidos" label="Pedidos abiertos" value=${num(d.abiertos.length)} sub=${num(sum(d.abiertos, 'canastas')) + ' canastas'} tone="blue" onClick=${() => setDet('abiertos')} />
+      <${Kpi} icon="truck" label="Canastas por entregar" value=${num(canastasProx)} sub=${proxFecha ? 'desde ' + fechaCorta(proxFecha) : 'sin fecha'} tone="violet" onClick=${() => setDet('canastas')} />
+      <${Kpi} icon="clock" label="Por cobrar" value=${moneyShort(porCobrar)} sub="en pedidos abiertos" tone="red" onClick=${() => setDet('cobrar')} />
     </div>
 
     <div class="grid-2">
@@ -98,6 +99,43 @@ export function Inicio({ perfil }) {
             .map((p) => html`<${PedidoItem} key=${p.id} p=${p} onClick=${() => setSel(p)} />`)}</div>`}
       <//>
     </div>
+    ${det && html`<${DetalleKpi} tipo=${det} d=${d} onClose=${() => setDet(null)} onPedido=${(p) => { setDet(null); setSel(p); }} />`}
     ${sel && html`<${PedidoDrawer} pedido=${sel} onClose=${() => setSel(null)} onChanged=${r.reload} />`}
   </div>`;
+}
+
+/** Detalle de cada indicador del inicio. */
+function DetalleKpi({ tipo, d, onClose, onPedido }) {
+  const lista = (ps, valor) => ps.length ? html`<div class="list compacta">${ps.map((p) => html`<button key=${p.id} class="row-item" onClick=${() => onPedido(p)}>
+    <div class="ri-main"><b>#${p.id} · ${p.cliente || 'Cliente'}</b><span class="ri-meta">${fechaCorta(p.fecha_entrega)} · ${num(p.canastas)} can. · ${[p.barrio, p.municipio].filter(Boolean).join(', ')}</span></div>
+    <div class="row-btns"><b>${valor ? valor(p) : money(p.total)}</b><${EstadoBadge} e=${p.estado} /></div></button>`)}</div>` : html`<${Empty} icon="check" title="No hay pedidos aquí" />`;
+  if (tipo === 'ventas') {
+    const sem = d.semanas.slice(0, 8);
+    return html`<${Modal} wide title="Ventas por semana" onClose=${onClose}>
+      <p class="muted small">Ventas de pedidos entregados por semana (lunes a domingo).</p>
+      <div class="tabla-wrap"><table class="tabla"><thead><tr><th>Semana</th><th>Ventas</th><th>Pedidos</th><th>Canastas</th><th>Ticket promedio</th><th>Cancelados</th></tr></thead>
+        <tbody>${sem.map((s) => html`<tr key=${s.semana}><td>${fecha(s.semana)}</td><td class="num">${money(s.ventas)}</td><td class="num">${num(s.pedidos)}</td><td class="num">${num(s.canastas)}</td><td class="num">${money(s.ticket_promedio)}</td><td class="num">${num(s.cancelados)}</td></tr>`)}</tbody></table></div>
+      <div class="tabla-cards">${sem.map((s) => html`<div key=${s.semana} class="tc"><div><span>Semana</span><b>${fecha(s.semana)}</b></div><div><span>Ventas</span><b>${money(s.ventas)}</b></div><div><span>Pedidos</span><b>${num(s.pedidos)}</b></div><div><span>Ticket</span><b>${money(s.ticket_promedio)}</b></div></div>`)}</div>
+      <a class="btn ghost block" href="#/estadisticas" onClick=${onClose}><${Icon} n="chart" size=${16} />Ver estadísticas completas</a>
+    <//>`;
+  }
+  if (tipo === 'abiertos') {
+    const grupos = [...groupBy(d.abiertos, (p) => p.estado).entries()];
+    return html`<${Modal} wide title=${'Pedidos abiertos · ' + d.abiertos.length} onClose=${onClose}>
+      ${grupos.map(([e, ps]) => html`<div key=${e} class="det-grupo"><div class="section-title"><${EstadoBadge} e=${e} /> ${ps.length} pedido(s) · ${num(sum(ps, 'canastas'))} canastas</div>${lista(ps)}</div>`)}
+      ${!grupos.length && html`<${Empty} icon="check" title="No hay pedidos abiertos" />`}
+    <//>`;
+  }
+  if (tipo === 'canastas') {
+    const fechas = [...groupBy(d.consolidado, (x) => x.fecha_entrega).entries()];
+    return html`<${Modal} title="Canastas por entregar" onClose=${onClose}>
+      ${fechas.length ? fechas.map(([f, filas]) => html`<div key=${f} class="prep"><div class="prep-head"><b>${fechaLarga(f)}</b><${Badge} tone="amber">${num(sum(filas, 'canastas'))} canastas<//></div>
+        <div class="prep-items">${filas.map((x) => html`<div class="prep-item" key=${x.producto}><span class="egg-dot"></span><span>${x.producto}</span><b>${num(x.canastas)}</b></div>`)}</div></div>`)
+        : html`<${Empty} icon="egg" title="Nada por entregar" />`}
+      <a class="btn ghost block" href="#/entregas" onClick=${onClose}><${Icon} n="truck" size=${16} />Ir a Entregas</a>
+    <//>`;
+  }
+  const ps = d.abiertos.filter((p) => p.pago_estado !== 'pagado').sort((a, b) => (Number(b.total) || 0) - (Number(a.total) || 0));
+  return html`<${Modal} wide title=${'Por cobrar · ' + money(sum(ps, 'total'))} onClose=${onClose}>
+    <p class="muted small">Pedidos abiertos que aún no tienen el pago verificado. Toca uno para registrar el pago.</p>${lista(ps)}<//>`;
 }

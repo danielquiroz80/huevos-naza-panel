@@ -1,5 +1,5 @@
 import { html, useState, useEffect, useRef, Icon, Card, Kpi, Tabs, Loader, Empty, ErrorBox, Modal, Field, AsyncButton, Badge, Meter, Drawer, SearchBox, useAsync, toast } from '../ui.js';
-import { sb, q, num, fechaLarga, fechaCorta, fechaHora, hoyISO, isoDate, sumarDias, sum, accion, rutaLink, navegarLink, whatsappLink,
+import { sb, q, num, money, fechaLarga, fechaCorta, fechaHora, hoyISO, isoDate, sumarDias, sum, accion, rutaLink, navegarLink, whatsappLink,
   ubicacionActual, comprimirFoto, MOTIVOS, nombreUsuario, norm, ESTADOS } from '../lib.js';
 import { Mapa, MapaRutas, COLORES_RUTA } from '../mapa.js';
 import { EstadoBadge } from './pedidos.js';
@@ -59,31 +59,42 @@ function BotonOrdenar({ onClick, disabled, google, texto }) {
 const puntoDe = (ruta, campo) => ruta && ruta[campo + '_lat'] ? { texto: ruta[campo + '_texto'] || '', lat: ruta[campo + '_lat'], lng: ruta[campo + '_lng'] } : (ruta && ruta[campo + '_texto'] ? { texto: ruta[campo + '_texto'], lat: null, lng: null } : null);
 const VACIO = { texto: '', lat: null, lng: null };
 
-/** Reparte los pedidos entre los repartidores disponibles por zonas (barrido angular) y según su capacidad. */
+/** Reparte los pedidos entre los repartidores elegidos.
+ *  1) Prioridad por orden de llegada: entran primero los pedidos más antiguos hasta llenar la capacidad total.
+ *  2) Los que entran se agrupan por zonas (barrido alrededor del punto de salida) sin pasar la capacidad de cada repartidor.
+ *  Lo que no cabe queda disponible para otra ruta. */
 function repartir(pedidos, reps, centro) {
-  const con = pedidos.filter((p) => p.lat && p.lng), sin = pedidos.filter((p) => !(p.lat && p.lng));
+  const can = (p) => Number(p.canastas) || 1;
+  const caps = reps.map((r) => Number(r.capacidad_canastas) || Infinity);
+  const capTotal = caps.reduce((a, c) => a + c, 0);
+  const fifo = [...pedidos].sort((a, b) => (new Date(a.creado || 0) - new Date(b.creado || 0)) || (a.id - b.id));
+  const entran = [], quedan = [];
+  let acum = 0;
+  for (const p of fifo) { if (acum + can(p) <= capTotal) { entran.push(p); acum += can(p); } else quedan.push(p); }
+  // Orden geográfico (barrido angular empezando en el hueco más grande)
+  const con = entran.filter((p) => p.lat && p.lng), sin = entran.filter((p) => !(p.lat && p.lng));
   const c = centro && centro.lat ? centro : con.length ? { lat: sum(con, 'lat') / con.length, lng: sum(con, 'lng') / con.length } : null;
-  const grupos = reps.map(() => []);
-  if (con.length && c) {
-    const ang = (p) => Math.atan2(p.lat - c.lat, p.lng - c.lng);
-    const ord = con.map((p) => ({ p, a: ang(p) })).sort((x, y) => x.a - y.a);
+  let orden = con;
+  if (c && con.length > 1) {
+    const ord = con.map((p) => ({ p, a: Math.atan2(p.lat - c.lat, p.lng - c.lng) })).sort((x, y) => x.a - y.a);
     let gap = -1, ini = 0;
     ord.forEach((x, i) => { const sig = i + 1 < ord.length ? ord[i + 1].a : ord[0].a + 2 * Math.PI; if (sig - x.a > gap) { gap = sig - x.a; ini = (i + 1) % ord.length; } });
-    const giro = ord.slice(ini).concat(ord.slice(0, ini)).map((x) => x.p);
-    const caps = reps.map((r) => Number(r.capacidad_canastas) || 0);
-    const prom = caps.filter(Boolean).length ? sum(caps.filter(Boolean), (x) => x) / caps.filter(Boolean).length : 1;
-    const pesos = caps.map((x) => x || prom), totalPeso = sum(pesos, (x) => x);
-    const total = sum(giro, (p) => Number(p.canastas) || 1);
-    let acum = 0;
-    const cortes = []; pesos.reduce((a, w) => { cortes.push(a + w / totalPeso); return a + w / totalPeso; }, 0);
-    giro.forEach((p) => {
-      const w = Number(p.canastas) || 1; const medio = (acum + w / 2) / total; acum += w;
-      let k = cortes.findIndex((x) => medio <= x + 1e-9); if (k < 0) k = reps.length - 1;
-      grupos[k].push(p);
-    });
-  } else sin.unshift(...con);
-  sin.forEach((p) => { let k = 0; grupos.forEach((g, i) => { if (sum(g, 'canastas') < sum(grupos[k], 'canastas')) k = i; }); grupos[k].push(p); });
-  return grupos;
+    orden = ord.slice(ini).concat(ord.slice(0, ini)).map((x) => x.p);
+  }
+  orden = orden.concat(sin);
+  // Metas de carga proporcionales a la capacidad (o partes iguales si no hay capacidad definida)
+  const finitas = caps.every((x) => isFinite(x));
+  const metas = caps.map((x) => (finitas ? acum * x / capTotal : acum / reps.length));
+  const grupos = reps.map(() => []), carga = reps.map(() => 0);
+  let k = 0;
+  for (const p of orden) {
+    const w = can(p);
+    while (k < reps.length - 1 && (carga[k] + w > caps[k] || carga[k] >= metas[k] - 1e-9)) k++;
+    let j = carga[k] + w <= caps[k] ? k : caps.findIndex((cap, i) => carga[i] + w <= cap);
+    if (j < 0) { quedan.push(p); continue; }
+    grupos[j].push(p); carga[j] += w;
+  }
+  return { grupos, quedan: quedan.sort((a, b) => (new Date(a.creado || 0) - new Date(b.creado || 0)) || (a.id - b.id)) };
 }
 
 const totales = (ps) => { const m = new Map(); for (const p of ps) for (const it of p.items || []) m.set(it.producto, (m.get(it.producto) || 0) + (Number(it.cantidad) || 0)); return [...m.entries()].sort(); };
@@ -101,6 +112,7 @@ function Paquetes({ dia, origen, admin, perfil, onListo }) {
   }, [dia]);
   const [sel, setSel] = useState(null);
   const [plan, setPlan] = useState(null);
+  const [quedan, setQuedan] = useState([]);
   const [abierto, setAbierto] = useState(null);
   const [crear, setCrear] = useState(false);
   const [dlg, setDlg] = useState(null);
@@ -118,8 +130,8 @@ function Paquetes({ dia, origen, admin, perfil, onListo }) {
   const toggle = (e) => { setPlan(null); setSel(sel.includes(e) ? sel.filter((x) => x !== e) : [...sel, e]); };
   const sugerir = () => {
     if (!elegidos.length) return toast('Elige al menos un repartidor', 'error');
-    const grupos = elegidos.length === 1 ? [pedidos.slice()] : repartir(pedidos, elegidos, origen);
-    setPlan(elegidos.map((x, i) => ({ rep: x, ids: grupos[i].map((p) => p.id) }))); setAbierto(null);
+    const { grupos, quedan: q2 } = repartir(pedidos, elegidos, origen);
+    setPlan(elegidos.map((x, i) => ({ rep: x, ids: grupos[i].map((p) => p.id) }))); setQuedan(q2); setAbierto(null);
   };
   const mover = (id, de, a) => setPlan(plan.map((g, i) => i === de ? { ...g, ids: g.ids.filter((x) => x !== id) } : i === a ? { ...g, ids: [...g.ids, id] } : g));
   const publicar = async () => {
@@ -168,7 +180,8 @@ function Paquetes({ dia, origen, admin, perfil, onListo }) {
           <span><b>${nombre(x)}${perfil && x.email === perfil.email ? ' (tú)' : ''}</b><small>${ocu ? 'Ya está en recorrido' : x.capacidad_canastas ? 'Hasta ' + x.capacidad_canastas + ' canastas' : 'Sin capacidad definida'}</small></span></button>`;
       })}</div>
       <div class="auto-pie">
-        <span>${elegidos.length === 0 ? 'Ningún repartidor elegido' : elegidos.length === 1 ? html`<b>1 repartidor</b>: una sola ruta con todo` : html`<b>${elegidos.length} repartidores</b>: ${elegidos.length} rutas equilibradas por zona y capacidad`}</span>
+        <span>${elegidos.length === 0 ? 'Ningún repartidor elegido' : elegidos.length === 1 ? html`<b>1 repartidor</b>: una sola ruta hasta llenar su capacidad` : html`<b>${elegidos.length} repartidores</b>: ${elegidos.length} rutas equilibradas por zona y capacidad`}
+          · capacidad ${elegidos.some((x) => !x.capacidad_canastas) ? 'sin límite definido' : num(sum(elegidos, 'capacidad_canastas')) + ' canastas'} · primero los pedidos más antiguos</span>
         <button class="btn violet" disabled=${!elegidos.length} onClick=${sugerir}><${Icon} n="spark" size=${16} />${plan ? 'Volver a sugerir' : 'Sugerir rutas'}</button>
       </div>
       ${plan && html`<div class="paquetes">${plan.map((g, i) => {
@@ -189,7 +202,9 @@ function Paquetes({ dia, origen, admin, perfil, onListo }) {
           </li>`)}</ol>`}
         </section>`;
       })}</div>
-      <${AsyncButton} className="btn primary big block" icon="check" onClick=${publicar}>Publicar ${plan.length} ruta(s)<//>
+      ${quedan.length > 0 && html`<div class="warn"><${Icon} n="alert" size=${16} /><span><b>${quedan.length} pedido(s) · ${num(sum(quedan, 'canastas'))} canastas no caben</b> en la capacidad de los repartidores elegidos.
+        Se priorizaron los pedidos que llegaron primero; estos quedan disponibles para otra ruta: ${quedan.slice(0, 8).map((p) => '#' + p.id).join(', ')}${quedan.length > 8 ? '…' : ''}.</span></div>`}
+      <${AsyncButton} className="btn primary big block" icon="check" onClick=${publicar}>Publicar ${plan.filter((g) => g.ids.length).length} ruta(s)<//>
       <p class="muted small center">Las rutas quedan disponibles. Cuando un repartidor toma una, se bloquea para los demás; si la libera, vuelve a estar disponible.</p>`}
     <//>`}
 
@@ -200,6 +215,106 @@ function Paquetes({ dia, origen, admin, perfil, onListo }) {
         : dlg.t === 'deshacer' ? 'La ruta desaparece y sus pedidos quedan libres para repartirlos de nuevo.'
         : 'La ruta deja de estar asignada y vuelve a quedar disponible para que cualquier repartidor la tome.'}</p>
     <//>`}
+  </div>`;
+}
+
+/* =================== Huevos dañados y canastas extra =================== */
+const TIPO_DANO = { quebrado: 'Quebrados', danado: 'Rajados o dañados', sucio: 'Sucios', otro: 'Otro' };
+const MOMENTO = { carga: 'Al cargar', ruta: 'En el camino', entrega: 'En la entrega', bodega: 'En bodega' };
+let productosCache = null;
+const cargarProductos = async () => productosCache || (productosCache = await q(sb.rpc('panel_productos_lista')));
+const totalExtras = (ruta) => sum(ruta && ruta.extras || [], 'canastas');
+
+/** Registro rápido de huevos quebrados o dañados (repartidor o Admin). */
+function ReportarDano({ ruta, paradas = [], pedidoId, onClose, onListo }) {
+  const prods = useAsync(cargarProductos, []);
+  const [f, setF] = useState({ producto: null, unidades: 1, tipo: 'quebrado', repuesto: totalExtras(ruta) > 0, pedido: pedidoId || '', nota: '' });
+  const [foto, setFoto] = useState(null);
+  useEffect(() => {
+    if (prods.data && !f.producto) {
+      const ped = paradas.find((p) => p.id === Number(f.pedido));
+      const nom = ped && ped.items && ped.items[0] && ped.items[0].producto;
+      const pr = prods.data.find((x) => x.nombre === nom) || prods.data[0];
+      if (pr) setF((x) => ({ ...x, producto: pr.id }));
+    }
+  }, [prods.data]);
+  const pr = prods.data && prods.data.find((x) => x.id === f.producto);
+  const valor = pr ? Math.round((Number(pr.precio) || 0) * f.unidades / 30) : 0;
+  const set = (k, v) => setF({ ...f, [k]: v });
+  const guardar = async () => {
+    if (!f.producto) throw new Error('Elige el producto.');
+    if (!(f.unidades > 0)) throw new Error('Indica cuántos huevos.');
+    if (f.tipo === 'otro' && !f.nota.trim()) throw new Error('Cuéntanos qué pasó.');
+    let path = null;
+    if (foto) {
+      const blob = await comprimirFoto(foto);
+      path = 'novedades/' + (ruta ? ruta.fecha + '/R' + ruta.id : 'bodega') + '-' + Date.now() + '.jpg';
+      const { error } = await sb.storage.from('entregas').upload(path, blob, { contentType: 'image/jpeg' });
+      if (error) { path = null; toast('No se pudo subir la foto; se guarda el reporte sin foto.', 'error'); }
+    }
+    await q(sb.rpc('panel_reportar_novedad', { p_ruta: ruta ? ruta.id : null, p_pedido: f.pedido ? Number(f.pedido) : null, p_producto: f.producto, p_unidades: f.unidades,
+      p_tipo: f.tipo, p_repuesto: !!f.repuesto, p_nota: f.nota || null, p_foto: path }));
+    toast(f.unidades + ' huevo(s) reportados' + (f.repuesto ? ' y repuestos con los extra' : ''));
+    if (navigator.vibrate) navigator.vibrate(40);
+    onListo && onListo();
+  };
+  return html`<${Modal} title="Reportar huevos dañados" onClose=${onClose}
+    footer=${html`<button class="btn ghost" onClick=${onClose}>Cancelar</button><${AsyncButton} className="btn primary" icon="check" onClick=${guardar}>Guardar reporte<//>`}>
+    <div class="dano">
+      <div class="field"><span class="field-label">¿Qué pasó?</span>
+        <div class="seg-grande">${Object.entries(TIPO_DANO).map(([k, l]) => html`<button key=${k} class=${f.tipo === k ? 'on' : ''} onClick=${() => set('tipo', k)}>${l}</button>`)}</div></div>
+      <div class="field"><span class="field-label">Producto</span>
+        ${!prods.data ? html`<${Loader} rows=${1} />` : html`<div class="chips">${prods.data.map((x) => html`<button key=${x.id} class=${'chip-b' + (f.producto === x.id ? ' on' : '')} onClick=${() => set('producto', x.id)}>${x.nombre}</button>`)}</div>`}</div>
+      <div class="field"><span class="field-label">¿Cuántos huevos?</span>
+        <div class="stepper">
+          <button aria-label="Menos" onClick=${() => set('unidades', Math.max(1, f.unidades - 1))}>−</button>
+          <input type="number" inputmode="numeric" min="1" value=${f.unidades} onInput=${(e) => set('unidades', Math.max(1, Math.min(3000, parseInt(e.target.value || '1', 10) || 1)))} />
+          <button aria-label="Más" onClick=${() => set('unidades', f.unidades + 1)}>+</button>
+        </div>
+        <div class="chips rapido">${[[6, '6'], [12, '12'], [15, '½ canasta'], [30, '1 canasta']].map(([n, l]) => html`<button key=${n} class="chip-b" onClick=${() => set('unidades', n)}>${l}</button>`)}</div>
+        ${valor > 0 && html`<span class="muted small">Pérdida aproximada: ${money(valor)}</span>`}</div>
+      ${ruta && html`<label class=${'toggle-fila' + (f.repuesto ? ' on' : '')}><input type="checkbox" checked=${f.repuesto} onChange=${(e) => set('repuesto', e.target.checked)} />
+        <span><b>Los repuse con huevos extra</b><small>${totalExtras(ruta) ? 'Llevas ' + totalExtras(ruta) + ' canasta(s) extra en esta ruta.' : 'No registraste canastas extra para esta ruta.'}</small></span></label>`}
+      ${paradas.length > 0 && html`<${Field} label="¿Afectó un pedido? (opcional)"><select class="input" value=${f.pedido} onChange=${(e) => set('pedido', e.target.value)}>
+        <option value="">No, fue en la carga o en el camino</option>${paradas.map((p) => html`<option value=${p.id}>#${p.id} · ${p.direccion_entrega}</option>`)}</select><//>`}
+      <${Field} label=${f.tipo === 'otro' ? 'Cuéntanos qué pasó' : 'Comentario (opcional)'}><input class="input" value=${f.nota} onInput=${(e) => set('nota', e.target.value)} placeholder="Ej.: se cayó la canasta en un hueco" /><//>
+      <label class="foto-mini"><${Icon} n="camera" size=${18} /><span>${foto ? 'Foto lista ✓' : 'Agregar foto (opcional)'}</span><input type="file" accept="image/*" capture="environment" onChange=${(e) => setFoto(e.target.files && e.target.files[0])} /></label>
+    </div>
+  <//>`;
+}
+
+/** Canastas extra que lleva el repartidor para reponer daños. */
+function ExtrasRuta({ ruta, editable, onCambio }) {
+  const prods = useAsync(cargarProductos, []);
+  const [ex, setEx] = useState(() => Object.fromEntries((ruta.extras || []).map((e) => [e.producto_id, e.canastas])));
+  const [sucio, setSucio] = useState(false);
+  const cambiar = (id, d) => { setEx({ ...ex, [id]: Math.max(0, Math.min(50, (ex[id] || 0) + d)) }); setSucio(true); };
+  const guardar = async () => { await q(sb.rpc('panel_extras_ruta', { p_ruta: ruta.id, p_extras: Object.entries(ex).map(([producto_id, canastas]) => ({ producto_id: Number(producto_id), canastas })) })); setSucio(false); toast('Canastas extra guardadas'); onCambio && onCambio(); };
+  if (!prods.data) return null;
+  const total = Object.values(ex).reduce((a, b) => a + b, 0);
+  return html`<div class="extras">
+    <div class="extras-head"><span><${Icon} n="box" size=${15} /><b>Canastas extra</b> <span class="muted small">para reponer huevos dañados (opcional)</span></span>${total > 0 && html`<${Badge} tone="blue">${total} extra<//>`}</div>
+    ${editable ? html`<div class="extras-lista">${prods.data.map((x) => html`<div key=${x.id} class="extra-fila"><span>${x.nombre}</span>
+        <div class="stepper sm"><button onClick=${() => cambiar(x.id, -1)} aria-label=${'Menos ' + x.nombre}>−</button><b>${ex[x.id] || 0}</b><button onClick=${() => cambiar(x.id, 1)} aria-label=${'Más ' + x.nombre}>+</button></div></div>`)}</div>
+      ${sucio && html`<${AsyncButton} className="btn sm primary" icon="check" onClick=${guardar}>Guardar extras<//>`}`
+      : html`<span class="muted small">${(ruta.extras || []).length ? ruta.extras.map((e) => e.canastas + ' ' + e.producto).join(' · ') : 'No lleva canastas extra.'}</span>`}
+  </div>`;
+}
+
+/** Lista de daños reportados en una ruta. */
+function DanosRuta({ ruta, admin, version, onCambio }) {
+  const r = useAsync(() => q(sb.from('novedades_huevos').select('*').eq('ruta_id', ruta.id).eq('anulada', false).order('creado_en', { ascending: false })), [ruta.id, version]);
+  const d = r.data || [];
+  const anular = async (id) => { await q(sb.rpc('panel_anular_novedad', { p_id: id })); toast('Reporte anulado'); r.reload(); onCambio && onCambio(); };
+  const usados = sum(d.filter((x) => x.repuesto), 'unidades');
+  return html`<div class="stack">
+    <div class="mini-kpis"><div class="no"><b>${num(sum(d, 'unidades'))}</b><span>Huevos dañados</span></div><div><b>${money(sum(d, 'valor_estimado'))}</b><span>Pérdida aprox.</span></div>
+      <div><b>${totalExtras(ruta)}</b><span>Canastas extra</span></div><div class="ok"><b>${num(usados)}</b><span>Repuestos con extra</span></div></div>
+    ${!d.length ? html`<${Empty} icon="egg" title="Sin daños reportados" />` : html`<div class="list">${d.map((x) => html`<div key=${x.id} class="row-item static">
+      <div class="ri-main"><b>${x.unidades} ${x.producto} · ${TIPO_DANO[x.tipo]}</b><span class="ri-meta">${MOMENTO[x.momento]}${x.pedido_id ? ' · pedido #' + x.pedido_id : ''} · ${fechaHora(x.creado_en)}${x.repuesto ? ' · repuesto con extra' : ''}</span>
+        ${x.nota && html`<span class="ri-meta">“${x.nota}”</span>`}</div>
+      <div class="row-btns">${x.foto_path && html`<${AsyncButton} className="btn sm ghost" icon="external" onClick=${async () => { const { data } = await sb.storage.from('entregas').createSignedUrl(x.foto_path, 300); if (data) window.open(data.signedUrl, '_blank', 'noopener'); }}>Foto<//>`}
+        ${admin && html`<${AsyncButton} className="btn sm danger-ghost" onClick=${() => anular(x.id)}>Anular<//>`}</div></div>`)}</div>`}
   </div>`;
 }
 
@@ -262,7 +377,8 @@ function RutasLista({ onVer }) {
 /* ---------- Detalle de una ruta ---------- */
 const EVENTOS = { creada: 'Ruta creada', tomada: 'Tomada por', liberada: 'Liberada', reasignada: 'Reasignada a', iniciada: 'Recorrido iniciado', finalizada: 'Ruta finalizada', cancelada: 'Ruta cancelada',
   carga_confirmada: 'Carga confirmada', carga_sin_confirmar: 'Carga sin confirmar', pedido_agregado: 'Pedido agregado', pedido_retirado: 'Pedido retirado',
-  pedido_en_camino: 'En camino a', pedido_entregado: 'Entregado', pedido_no_entregado: 'No entregado', pedido_confirmado: 'Pedido vuelve a confirmado', pedido_cancelado: 'Pedido cancelado' };
+  pedido_en_camino: 'En camino a', pedido_entregado: 'Entregado', pedido_no_entregado: 'No entregado', pedido_confirmado: 'Pedido vuelve a confirmado', pedido_cancelado: 'Pedido cancelado',
+  pedido_pendiente: 'Pedido vuelve a pendiente', pedido_preparando: 'Pedido en preparación', novedad_huevos: 'Huevos dañados reportados', extras: 'Canastas extra actualizadas' };
 function RutaDetalle({ id, onClose, onAbrir }) {
   const [tab, setTab] = useState('paradas');
   const [dlg, setDlg] = useState(null);
@@ -308,7 +424,10 @@ function RutaDetalle({ id, onClose, onAbrir }) {
     ${ru.motivo_cancelacion && html`<div class="warn"><${Icon} n="alert" size=${15} />Motivo de cancelación: ${ru.motivo_cancelacion}</div>`}
     <div class="rd-mapa"><${Mapa} origen=${{ lat: ru.origen_lat, lng: ru.origen_lng }} paradas=${d.paradas} actual=${(d.paradas.find((p) => p.estado === 'en_camino') || {}).id}
       ubicacion=${ru.estado === 'en_curso' && ru.ultima_lat ? { lat: ru.ultima_lat, lng: ru.ultima_lng } : null} height=${260} /></div>
-    <${Tabs} value=${tab} onChange=${setTab} items=${[{ v: 'paradas', label: 'Paradas', n: d.paradas.length }, { v: 'incidencias', label: 'Incidencias', n: no }, { v: 'historial', label: 'Historial', n: d.eventos.length }]} />
+    <${Tabs} value=${tab} onChange=${setTab} items=${[{ v: 'paradas', label: 'Paradas', n: d.paradas.length }, { v: 'incidencias', label: 'Incidencias', n: no }, { v: 'danos', label: 'Huevos dañados' }, { v: 'historial', label: 'Historial', n: d.eventos.length }]} />
+    ${tab === 'danos' && html`<div class="stack"><${ExtrasRuta} ruta=${ru} editable=${['planeada', 'en_curso'].includes(ru.estado)} onCambio=${r.reload} />
+      <button class="btn" onClick=${() => setDlg({ t: 'dano' })}><${Icon} n="egg" size=${15} />Reportar huevos dañados</button>
+      <${DanosRuta} ruta=${ru} admin=${true} version=${d.eventos.length} onCambio=${r.reload} /></div>`}
     ${tab === 'paradas' && html`<ol class="paradas detalle">${d.paradas.map((p, i) => html`<li key=${p.id} class=${'parada ' + p.estado}>
       <span class="num">${p.estado === 'entregado' ? '✓' : p.estado === 'no_entregado' ? '!' : i + 1}</span>
       <div class="ri-main"><b class="dir-main">${p.direccion_entrega}</b><span class="dir-sub">${[p.barrio, p.municipio].filter(Boolean).join(' · ')}</span>
@@ -325,7 +444,8 @@ function RutaDetalle({ id, onClose, onAbrir }) {
       <span class="tl-dot"></span><div><b>${EVENTOS[e.evento] || e.evento}${e.pedido_id ? ' #' + e.pedido_id : ''}${e.evento === 'tomada' || e.evento === 'reasignada' ? ' ' + nombreUsuario(e.detalle.ahora) : ''}</b>
         <span class="muted small">${fechaHora(e.creado_en)} · ${e.usuario === 'sistema' ? 'Sistema' : nombreUsuario(e.usuario)}${e.detalle && e.detalle.motivo ? ' · ' + (MOTIVOS[e.detalle.motivo] || e.detalle.motivo) : ''}</span></div></div>`)}
       ${!d.eventos.length && html`<${Empty} icon="history" title="Sin cambios registrados todavía" />`}</div>`}
-    ${dlg && html`<${Modal} title=${dlg.t === 'cancelar' ? 'Cancelar ruta R-' + ru.id : dlg.t === 'liberar' ? 'Liberar ruta R-' + ru.id : 'Finalizar ruta R-' + ru.id} onClose=${() => setDlg(null)}
+    ${dlg && dlg.t === 'dano' && html`<${ReportarDano} ruta=${ru} paradas=${d.paradas} onClose=${() => setDlg(null)} onListo=${() => { setDlg(null); r.reload(); }} />`}
+    ${dlg && dlg.t !== 'dano' && html`<${Modal} title=${dlg.t === 'cancelar' ? 'Cancelar ruta R-' + ru.id : dlg.t === 'liberar' ? 'Liberar ruta R-' + ru.id : 'Finalizar ruta R-' + ru.id} onClose=${() => setDlg(null)}
       footer=${html`<button class="btn ghost" onClick=${() => setDlg(null)}>Volver</button><${AsyncButton} className=${'btn ' + (dlg.t === 'cancelar' ? 'danger' : 'primary')} icon="check" onClick=${accionRuta}>Sí, continuar<//>`}>
       <p>${dlg.t === 'cancelar' ? 'Los pedidos que aún no se han entregado vuelven a quedar disponibles para otra ruta. Los entregados y los no entregados conservan su historial en esta ruta.'
         : dlg.t === 'liberar' ? 'La ruta deja de estar asignada a ' + (repNombre || 'el repartidor') + ' y vuelve a quedar disponible para que otro la tome.' : 'Todas las paradas tienen resultado. La ruta quedará como finalizada.'}</p>
@@ -570,7 +690,7 @@ function Planear({ onVer }) {
   const porId = new Map(pedidos.map((p) => [p.id, p]));
   const filas = (lista || []).map((x) => ({ ...porId.get(x.id), ...x })).filter((x) => x.cliente !== undefined);
   const enLista = new Set(filas.map((p) => p.id));
-  const sinRuta = pedidos.filter((p) => !p.ruta_id && ['pendiente', 'confirmado', 'preparando'].includes(p.estado) && !enLista.has(p.id));
+  const sinRuta = pedidos.filter((p) => !p.ruta_id && ['pendiente', 'confirmado', 'preparando'].includes(p.estado) && !enLista.has(p.id)).sort((a, b) => a.id - b.id); // primero los que llegaron antes
   const repSel = d.data ? d.data.reps.find((x) => x.email === rep) : null;
   const canastas = sum(filas, 'canastas');
   const guardadas = ruta ? pedidos.filter((p) => p.ruta_id === ruta.id).sort((a, b) => (a.orden_manual ?? 99) - (b.orden_manual ?? 99)).map((p) => p.id) : [];
@@ -737,6 +857,7 @@ function RutaActiva({ perfil, rutaId, onDisponibles }) {
   const [nueva, setNueva] = useState(false);
   const [editarPedidos, setEditarPedidos] = useState(false);
   const [yo, setYo] = useState(null);
+  const [verDanos, setVerDanos] = useState(0);
 
   // Mientras la ruta está en curso, el repartidor comparte su ubicación (solo con la app abierta).
   const enCurso = r.data && r.data.ruta && r.data.ruta.estado === 'en_curso' && !gestor;
@@ -782,7 +903,8 @@ function RutaActiva({ perfil, rutaId, onDisponibles }) {
     <section class="ruta-head">
       <div><span class="hero-kicker">${fechaLarga(ruta.fecha)}${gestor && ruta.repartidor ? ' · ' + nombreUsuario(ruta.repartidor) : ''}</span>
         <h2>${ruta.estado === 'terminada' ? 'Ruta terminada' : ruta.estado === 'en_curso' ? 'En recorrido' : 'Tu ruta está lista'}</h2>
-        <span>${hechos.length} de ${paradas.length} paradas · ${num(sum(pendientes, 'canastas'))} canastas por entregar</span></div>
+        <span>${hechos.length} de ${paradas.length} paradas · ${num(sum(pendientes, 'canastas'))} canastas por entregar</span>
+        ${['planeada', 'en_curso'].includes(ruta.estado) && html`<button class="btn-dano" onClick=${() => setDlg({ t: 'dano', pedido: actual && ruta.estado === 'en_curso' ? actual.id : '' })}><${Icon} n="egg" size=${16} />Huevos dañados</button>`}</div>
       <div class="ruta-ring" style=${{ '--p': pct }}><b>${pct}%</b></div>
     </section>
 
@@ -834,6 +956,9 @@ function RutaActiva({ perfil, rutaId, onDisponibles }) {
       <button class="btn green" onClick=${() => setDlg({ t: 'ok', p: actual })}><${Icon} n="check" size=${18} />Entregado</button>
     </div>`}
 
+    ${dlg && dlg.t === 'dano' && html`<${ReportarDano} ruta=${ruta} paradas=${pendientes} pedidoId=${dlg.pedido} onClose=${() => setDlg(null)} onListo=${() => { setDlg(null); setVerDanos(verDanos + 1); r.reload(); }} />`}
+    ${['planeada', 'en_curso', 'terminada'].includes(ruta.estado) && html`<details class="card danos-card" open=${verDanos > 0}><summary><${Icon} n="egg" size=${16} />Huevos dañados y canastas extra</summary>
+      <div class="card-body stack">${ruta.estado === 'en_curso' && html`<${ExtrasRuta} ruta=${ruta} editable=${true} onCambio=${r.reload} />`}<${DanosRuta} ruta=${ruta} admin=${gestor} version=${verDanos} /></div></details>`}
     ${dlg && dlg.t === 'ok' && html`<${EntregarModal} p=${dlg.p} ruta=${ruta} onClose=${() => setDlg(null)} onSend=${registrar} />`}
     ${dlg && dlg.t === 'no' && html`<${Modal} title="¿Qué pasó con la entrega?" onClose=${() => setDlg(null)}
       footer=${html`<button class="btn ghost" onClick=${() => setDlg(null)}>Volver</button>
@@ -926,7 +1051,9 @@ function PrepararRuta({ ruta, pendientes, gestor, onCambio, onPedidos }) {
         <div class="checklist">${productos.map(([k, v]) => html`<label key=${k} class=${'check-item' + (marcados.includes(k) ? ' on' : '')}>
           <input type="checkbox" checked=${marcados.includes(k)} onChange=${() => marcar(k)} /><span class="ci-box"><${Icon} n="check" size=${14} /></span>
           <span class="ci-txt">${k}</span><b>${num(v)}</b></label>`)}</div>
+        <${ExtrasRuta} ruta=${ruta} editable=${true} onCambio=${onCambio} />
         <${AsyncButton} className="btn green block" icon="check" disabled=${!todo} onClick=${() => confirmar(true)}>${todo ? 'Confirmo que llevo todo' : 'Marca cada producto (' + marcados.length + '/' + productos.length + ')'}<//>`}
+      ${cargada && totalExtras(ruta) > 0 && html`<span class="muted small">Llevas ${totalExtras(ruta)} canasta(s) extra para reponer daños.</span>`}
     </div>
 
     <div class="paso activo">

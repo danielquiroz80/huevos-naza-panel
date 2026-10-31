@@ -1,5 +1,5 @@
 import { html, useState, useEffect, Icon, Card, Tabs, Loader, Empty, ErrorBox, Modal, Field, AsyncButton, Badge, Drawer, SearchBox, Bars, Donut, useAsync, toast } from '../ui.js';
-import { sb, q, num, fechaCorta, fechaHora, hoyISO, isoDate, sumarDias, sum, norm, usuarios, claveInvalida, REGLAS_CLAVE, sugerirClave, whatsappLink, MOTIVOS, comprimirFoto } from '../lib.js';
+import { sb, q, num, money, fechaCorta, fechaHora, hoyISO, isoDate, sumarDias, sum, norm, usuarios, claveInvalida, REGLAS_CLAVE, sugerirClave, whatsappLink, MOTIVOS, comprimirFoto } from '../lib.js';
 
 export const CUENTA = { activo: ['Activo', 'green'], inactivo: ['Inactivo', 'gray'], suspendido: ['Suspendido', 'red'] };
 export const OPERATIVO = { disponible: ['Disponible', 'green'], con_ruta: ['Con ruta asignada', 'blue'], ocupado: ['En recorrido', 'violet'], fuera_servicio: ['Fuera de servicio', 'gray'] };
@@ -135,7 +135,10 @@ const PERIODOS = { 7: 'Últimos 7 días', 30: 'Últimos 30 días', 90: 'Últimos
 function StatsRepartidor({ email, tab }) {
   const [per, setPer] = useState('30');
   const desde = per === 'mes' ? hoyISO().slice(0, 8) + '01' : isoDate(sumarDias(new Date(), -(Number(per) - 1)));
-  const r = useAsync(() => q(sb.rpc('panel_repartidor_stats', { p_email: email, p_desde: desde, p_hasta: hoyISO() })), [email, per]);
+  const r = useAsync(async () => {
+    const [st, nov] = await Promise.all([q(sb.rpc('panel_repartidor_stats', { p_email: email, p_desde: desde, p_hasta: hoyISO() })), q(sb.rpc('panel_novedades_resumen', { p_desde: desde, p_hasta: hoyISO(), p_email: email }))]);
+    return { ...st, nov };
+  }, [email, per]);
   const d = r.data;
   const exito = d && d.entregados + d.fallidos ? Math.round((d.entregados / (d.entregados + d.fallidos)) * 100) : null;
   const semanas = d ? agrupar(d.por_dia, per === '7' ? 'dia' : Number(per) > 31 ? 'semana' : 'dia') : [];
@@ -148,6 +151,7 @@ function StatsRepartidor({ email, tab }) {
         <div><b>${num(d.en_ruta)}</b><span>En ruta</span></div><div class="ok"><b>${num(d.entregados)}</b><span>Entregados</span></div>
         <div class="no"><b>${num(d.fallidos)}</b><span>Fallidos</span></div><div><b>${exito == null ? '—' : exito + '%'}</b><span>Éxito</span></div>
         <div><b>${d.tiempo_promedio_min == null ? '—' : num(d.tiempo_promedio_min) + ' min'}</b><span>Tiempo por entrega</span></div><div><b>${num(d.rutas_total)}</b><span>Rutas</span></div>
+        <div class=${d.nov.unidades ? 'no' : ''}><b>${num(d.nov.unidades)}</b><span>Huevos dañados</span></div><div><b>${money(d.nov.valor)}</b><span>Pérdida aprox.</span></div>
       </div>
       <p class="muted small">"Tiempo por entrega" es el promedio de minutos entre una entrega y la anterior dentro de la misma ruta (la primera cuenta desde que inició el recorrido).</p>
       <${Card} title=${'Entregas ' + (Number(per) > 31 ? 'por semana' : 'por día')} icon="chart">
@@ -179,7 +183,7 @@ function agrupar(dias, modo) {
 /* =================== Crear / editar =================== */
 function RepartidorForm({ x, onClose, onListo }) {
   const nuevo = !x;
-  const [f, setF] = useState(() => x ? { ...datosDe(x), telefono: x.telefono || '', correo: x.correo || '', capacidad_canastas: x.capacidad_canastas || '' }
+  const [f, setF] = useState(() => x ? { ...datosDe(x), tipo_documento: x.tipo_documento || 'CC', transporte: x.transporte || 'moto', telefono: x.telefono || '', correo: x.correo || '', capacidad_canastas: x.capacidad_canastas || '' }
     : { nombres: '', apellidos: '', tipo_documento: 'CC', documento: '', telefono: '', correo: '', direccion: '', transporte: 'moto', tipo_vehiculo: '', placa: '', capacidad_canastas: '', observaciones: '', usuario: '', clave: sugerirClave(), disponibilidad: 'disponible' });
   const [foto, setFoto] = useState(null);
   const [prev, setPrev] = useState('');

@@ -18,7 +18,7 @@ const TIPOS = {
     ['cantidad', 'Canastas', 'n', (x) => x.cantidad], ['total', 'Valor', 'm', (x) => x.total], ['pago', 'Pago', 's', (x) => x.pago_estado],
     ['metodo', 'Método de pago', 's', (x) => x.metodo_pago], ['estado', 'Estado', 's', (x) => estPedido(x.estado)], ['ruta', 'Ruta', 's', rutaTxt],
     ['repartidor', 'Repartidor', 's', (x) => x.repartidor], ['entregado_en', 'Fecha y hora de entrega', 'dt', (x) => FH(x.entregado_en)],
-    ['motivo', 'Motivo de no entrega', 's', (x) => MOTIVOS[x.motivo_no_entrega] || x.motivo_no_entrega], ['obs', 'Observación de entrega', 's', (x) => x.entrega_obs],
+    ['danados', 'Huevos dañados', 'n', (x) => x.danados], ['motivo', 'Motivo de no entrega', 's', (x) => MOTIVOS[x.motivo_no_entrega] || x.motivo_no_entrega], ['obs', 'Observación de entrega', 's', (x) => x.entrega_obs],
     ['notas', 'Notas del pedido', 's', (x) => x.notas], ['canal', 'Canal', 's', (x) => x.canal]],
     def: ['id', 'fecha_entrega', 'cliente', 'telefono', 'direccion', 'productos', 'total', 'estado', 'ruta', 'repartidor', 'entregado_en'] },
   entregas: { label: 'Entregas', icon: 'truck', desc: 'Pedidos que pasaron por una ruta: tiempos, resultado y motivos.', cols: [
@@ -36,7 +36,8 @@ const TIPOS = {
     ['ok', 'Entregas exitosas', 'n', (x) => x.ok], ['no', 'Entregas fallidas', 'n', (x) => x.no], ['pend', 'Pendientes', 'n', (x) => x.paradas - x.ok - x.no],
     ['progreso', 'Progreso', 'p', (x) => x.paradas ? (x.ok + x.no) / x.paradas : 0], ['inicio', 'Hora de inicio', 'dt', (x) => FH(x.iniciada_en)],
     ['fin', 'Hora de finalización', 'dt', (x) => FH(x.terminada_en)], ['duracion', 'Duración (min)', 'n', (x) => minEntre(x.iniciada_en, x.terminada_en)],
-    ['km', 'Distancia estimada (km)', 'n', (x) => x.distancia_km], ['canastas', 'Canastas', 'n', (x) => x.canastas], ['cancelacion', 'Motivo de cancelación', 's', (x) => x.motivo_cancelacion]],
+    ['km', 'Distancia estimada (km)', 'n', (x) => x.distancia_km], ['canastas', 'Canastas', 'n', (x) => x.canastas], ['extras', 'Canastas extra', 'n', (x) => x.extras_canastas],
+    ['danados', 'Huevos dañados', 'n', (x) => x.danados], ['cancelacion', 'Motivo de cancelación', 's', (x) => x.motivo_cancelacion]],
     def: ['id', 'fecha', 'repartidor', 'estado', 'paradas', 'ok', 'no', 'progreso', 'inicio', 'fin', 'duracion'] },
   repartidores: { label: 'Repartidores', icon: 'users', desc: 'Rendimiento de cada repartidor en el periodo.', cols: [
     ['nombre', 'Repartidor', 's', (x) => x.nombre], ['documento', 'Documento', 's', (x) => x.documento], ['telefono', 'Celular', 's', (x) => x.telefono],
@@ -44,14 +45,23 @@ const TIPOS = {
     ['transporte', 'Transporte', 's', (x) => x.transporte], ['asignados', 'Pedidos asignados', 'n', (x) => x.stats.asignados], ['rutas', 'Rutas realizadas', 'n', (x) => x.stats.rutas_total],
     ['ok', 'Entregas exitosas', 'n', (x) => x.stats.entregados], ['no', 'Entregas fallidas', 'n', (x) => x.stats.fallidos],
     ['efectividad', 'Efectividad', 'p', (x) => x.stats.entregados + x.stats.fallidos ? x.stats.entregados / (x.stats.entregados + x.stats.fallidos) : null],
-    ['tiempo', 'Minutos promedio por entrega', 'n', (x) => x.stats.tiempo_promedio_min]],
-    def: ['nombre', 'cuenta', 'asignados', 'rutas', 'ok', 'no', 'efectividad', 'tiempo'] },
+    ['tiempo', 'Minutos promedio por entrega', 'n', (x) => x.stats.tiempo_promedio_min], ['danados', 'Huevos dañados', 'n', (x) => x.danados.unidades],
+    ['danados_ev', 'Reportes de daño', 'n', (x) => x.danados.eventos], ['perdida', 'Pérdida por daños', 'm', (x) => x.danados.valor]],
+    def: ['nombre', 'cuenta', 'asignados', 'rutas', 'ok', 'no', 'efectividad', 'tiempo', 'danados', 'perdida'] },
+  novedades: { label: 'Huevos dañados', icon: 'egg', desc: 'Huevos quebrados o dañados: cuántos, cuándo, en qué ruta y con qué repartidor.', cols: [
+    ['id', 'ID reporte', 'n', (x) => x.id], ['creado', 'Fecha y hora', 'dt', (x) => FH(x.creado)], ['repartidor', 'Repartidor', 's', (x) => x.repartidor || 'Sin repartidor'],
+    ['ruta', 'Ruta', 's', (x) => x.ruta_id ? 'R-' + x.ruta_id + (x.ruta ? ' · ' + x.ruta : '') : ''], ['pedido', 'Pedido', 'n', (x) => x.pedido_id], ['producto', 'Producto', 's', (x) => x.producto],
+    ['unidades', 'Huevos', 'n', (x) => x.unidades], ['tipo', 'Qué pasó', 's', (x) => TIPO_DANO[x.tipo] || x.tipo], ['momento', 'Cuándo', 's', (x) => MOMENTO[x.momento] || x.momento],
+    ['repuesto', 'Repuesto con extra', 's', (x) => x.repuesto ? 'Sí' : 'No'], ['valor', 'Pérdida aprox.', 'm', (x) => x.valor], ['nota', 'Comentario', 's', (x) => x.nota], ['foto', 'Foto', 's', (x) => x.foto ? 'Sí' : 'No']],
+    def: ['creado', 'repartidor', 'ruta', 'producto', 'unidades', 'tipo', 'momento', 'repuesto', 'valor'] },
   general: { label: 'Operación general', icon: 'chart', desc: 'Resumen diario: pedidos, entregas, rutas y efectividad.', cols: [
     ['dia', 'Fecha', 'd', (x) => x.dia], ['pedidos', 'Pedidos', 'n', (x) => x.pedidos], ['pend', 'Pendientes', 'n', (x) => x.pend], ['asig', 'Asignados a ruta', 'n', (x) => x.asig],
     ['ok', 'Entregados', 'n', (x) => x.ok], ['no', 'Con incidencia', 'n', (x) => x.no], ['canc', 'Cancelados', 'n', (x) => x.canc], ['rutas', 'Rutas', 'n', (x) => x.rutas],
     ['rutas_fin', 'Rutas finalizadas', 'n', (x) => x.rutas_fin], ['exito', 'Efectividad', 'p', (x) => x.ok + x.no ? x.ok / (x.ok + x.no) : null], ['ventas', 'Valor entregado', 'm', (x) => x.ventas]],
     def: ['dia', 'pedidos', 'pend', 'asig', 'ok', 'no', 'canc', 'rutas', 'rutas_fin', 'exito', 'ventas'] }
 };
+const TIPO_DANO = { quebrado: 'Quebrados', danado: 'Rajados o dañados', sucio: 'Sucios', otro: 'Otro' };
+const MOMENTO = { carga: 'Al cargar', ruta: 'En el camino', entrega: 'En la entrega', bodega: 'En bodega' };
 const PERIODOS = [['hoy', 'Hoy'], ['ayer', 'Ayer'], ['semana', 'Última semana'], ['mes', 'Último mes'], ['mes_actual', 'Mes actual'], ['rango', 'Rango personalizado']];
 function rango(p, d, h) {
   const hoy = hoyISO();
@@ -101,7 +111,7 @@ function NuevoReporte({ onHistorial }) {
   const opc = {
     repartidores: [...new Set(base.map((x) => tipo === 'rutas' ? x.repartidor_nombre : tipo === 'repartidores' ? x.nombre : x.repartidor).filter(Boolean))].sort(),
     zonas: [...new Set(base.map((x) => x.municipio || x.barrio).filter(Boolean))].sort(),
-    productos: [...new Set(base.flatMap((x) => (x.items || []).map((i) => i.producto)))].sort(),
+    productos: [...new Set(base.flatMap((x) => (x.items || (x.producto ? [{ producto: x.producto }] : [])).map((i) => i.producto)))].sort(),
     rutas: [...new Set(base.map((x) => tipo === 'rutas' ? 'R-' + x.id : x.ruta_id ? 'R-' + x.ruta_id : null).filter(Boolean))].sort()
   };
   const filtrar = (x) => {
@@ -111,7 +121,7 @@ function NuevoReporte({ onHistorial }) {
     if (f.ruta_estado.length && !f.ruta_estado.includes(tipo === 'rutas' ? x.estado : x.ruta_estado)) return false;
     if (f.cliente && !norm(x.cliente).includes(norm(f.cliente))) return false;
     if (f.zona && x.municipio !== f.zona && x.barrio !== f.zona) return false;
-    if (f.producto && !(x.items || []).some((i) => i.producto === f.producto)) return false;
+    if (f.producto && !(x.items || [{ producto: x.producto }]).some((i) => i.producto === f.producto)) return false;
     if (f.resultado && resultado(x.estado) !== f.resultado) return false;
     if (f.ruta && (tipo === 'rutas' ? 'R-' + x.id : 'R-' + x.ruta_id) !== f.ruta) return false;
     return true;
@@ -193,7 +203,7 @@ function Filtros({ tipo, f, setF, opc }) {
   const multi = (k, v) => setF({ ...f, [k]: f[k].includes(v) ? f[k].filter((x) => x !== v) : [...f[k], v] });
   const pedidoEst = ['pendiente', 'confirmado', 'preparando', 'en_camino', 'entregado', 'no_entregado', 'cancelado'];
   const usa = { pedidos: ['repartidor', 'estado', 'ruta_estado', 'cliente', 'zona', 'producto', 'ruta'], entregas: ['repartidor', 'resultado', 'ruta_estado', 'cliente', 'zona', 'producto', 'ruta'],
-    rutas: ['repartidor', 'ruta_estado', 'ruta'], repartidores: ['repartidor'], general: ['repartidor', 'zona', 'producto', 'ruta'] }[tipo];
+    rutas: ['repartidor', 'ruta_estado', 'ruta'], repartidores: ['repartidor'], general: ['repartidor', 'zona', 'producto', 'ruta'], novedades: ['repartidor', 'producto', 'ruta'] }[tipo];
   return html`<div class="filtros">
     ${usa.includes('repartidor') && html`<${Field} label="Repartidor"><select class="input" value=${f.repartidor} onChange=${set('repartidor')}><option value="">Todos</option>${opc.repartidores.map((x) => html`<option>${x}</option>`)}</select><//>`}
     ${usa.includes('estado') && html`<div class="field"><span class="field-label">Estado del pedido</span><div class="chips">${pedidoEst.map((e) => html`<button key=${e} class=${'chip-b' + (f.estado.includes(e) ? ' on' : '')} onClick=${() => multi('estado', e)}>${estPedido(e)}</button>`)}</div></div>`}
@@ -272,6 +282,17 @@ function estadisticas(tipo, filas, data) {
     tablas.push({ titulo: 'Comparación de rendimiento', enc: ['Repartidor', 'Entregados', 'Fallidos', 'Rutas'], filas: filas.map((x) => [x.nombre, x.stats.entregados, x.stats.fallidos, x.stats.rutas_total]), grafico: 'bar' });
     const ef = filas.filter((x) => x.stats.entregados + x.stats.fallidos);
     if (ef.length) tablas.push({ titulo: 'Efectividad por repartidor', enc: ['Repartidor', 'Efectividad'], t: 'p', filas: ef.map((x) => [x.nombre, x.stats.entregados / (x.stats.entregados + x.stats.fallidos)]), grafico: 'bar' });
+  } else if (tipo === 'novedades') {
+    const u = sum(filas, 'unidades'), rep = sum(filas.filter((x) => x.repuesto), 'unidades');
+    kpis.push({ l: 'Huevos dañados', v: u }, { l: 'Equivale a canastas', v: Math.round((u / 30) * 10) / 10 }, { l: 'Reportes', v: filas.length }, { l: 'Pérdida aprox.', v: sum(filas, 'valor'), t: 'm' });
+    if (u) kpis.push({ l: 'Repuestos con extra', v: rep / u, t: 'p' });
+    const porRep = new Map(); for (const x of filas) { const k = x.repartidor || 'Sin repartidor'; const g = porRep.get(k) || [0, 0, 0]; g[0] += x.unidades; g[1] += 1; g[2] += Number(x.valor) || 0; porRep.set(k, g); }
+    tablas.push({ titulo: 'Por repartidor', enc: ['Repartidor', 'Huevos', 'Reportes', 'Pérdida'], filas: [...porRep.entries()].sort((a, b) => b[1][0] - a[1][0]).map(([k, g]) => [k, ...g]), grafico: 'bar' });
+    const agr = (f) => { const m = new Map(); for (const x of filas) m.set(f(x), (m.get(f(x)) || 0) + x.unidades); return [...m.entries()].sort((a, b) => b[1] - a[1]); };
+    tablas.push({ titulo: 'Qué pasó', enc: ['Tipo', 'Huevos'], filas: agr((x) => TIPO_DANO[x.tipo] || x.tipo), grafico: 'pie' });
+    tablas.push({ titulo: 'Cuándo pasó', enc: ['Momento', 'Huevos'], filas: agr((x) => MOMENTO[x.momento] || x.momento), grafico: 'pie' });
+    tablas.push({ titulo: 'Por producto', enc: ['Producto', 'Huevos'], filas: agr((x) => x.producto), grafico: 'bar' });
+    tablas.push({ titulo: 'Por día', enc: ['Fecha', 'Huevos'], filas: agr((x) => x.fecha).sort((a, b) => a[0] < b[0] ? -1 : 1), grafico: 'col' });
   } else if (tipo === 'general') {
     const t = (k) => sum(filas, k), ok = t('ok'), no = t('no');
     kpis.push({ l: 'Total de pedidos', v: t('pedidos') }, { l: 'Pendientes de asignar', v: t('pend') }, { l: 'Asignados a ruta', v: t('asig') }, { l: 'Entregados', v: ok },

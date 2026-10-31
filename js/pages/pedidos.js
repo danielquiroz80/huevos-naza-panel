@@ -49,6 +49,7 @@ export function PedidoDrawer({ pedido, onClose, onChanged }) {
     <div class="detail-status"><${EstadoBadge} e=${p.estado} /><${PagoBadge} e=${p.pago_estado} />
       ${p.origen === 'pedido_fijo' && html`<${Badge} tone="gray"><${Icon} n="repeat" size=${12} /> Pedido fijo<//>`}
       ${p.puede_modificar && html`<${Badge} tone="gray">Modificable hasta ${fechaHora(p.limite_modificacion)}<//>`}
+      <button class="btn sm ghost cambiar-estado" onClick=${() => setDlg({ t: 'estado', estado: '', nota: '' })}><${Icon} n="edit" size=${14} />Cambiar estado</button>
     </div>
 
     ${p.estado === 'no_entregado' && html`<div class="warn"><${Icon} n="alert" size=${16} />No se entregó: ${MOTIVOS[p.motivo_no_entrega] || 'sin motivo'}. Reprográmalo o cancélalo.</div>`}
@@ -86,6 +87,20 @@ export function PedidoDrawer({ pedido, onClose, onChanged }) {
         </div>`)}</div>`}
       ${pendientesComprobante.length > 0 && html`<button class="btn sm block" onClick=${() => setDlg({ t: 'verificar' })}><${Icon} n="check" size=${15} />Verificar comprobante pendiente</button>`}
     </div>
+
+    ${dlg && dlg.t === 'estado' && html`<${Modal} title=${'Cambiar estado del pedido #' + p.id} onClose=${() => setDlg(null)}
+      footer=${html`<button class="btn ghost" onClick=${() => setDlg(null)}>Volver</button>
+      <${AsyncButton} className="btn primary" icon="check" disabled=${!dlg.estado} onClick=${async () => {
+        await q(sb.rpc('panel_cambiar_estado', { p_pedido: p.id, p_estado: dlg.estado, p_nota: dlg.nota || null }));
+        toast('Pedido #' + p.id + ' ahora está ' + (ESTADOS[dlg.estado] || {}).label.toLowerCase()); setDlg(null); onChanged && onChanged(); onClose();
+      }}>Guardar estado<//>`}>
+      <p class="muted small">Estado actual: <${EstadoBadge} e=${p.estado} />. Úsalo para corregir errores. Este cambio <b>no le avisa al cliente</b>; para avisarle usa los botones de abajo (En camino, Entregado, Cancelar).</p>
+      <div class="estado-opciones">${Object.entries(ESTADOS).filter(([k]) => k !== p.estado).map(([k, x]) => html`<button key=${k} class=${'estado-op ' + x.tone + (dlg.estado === k ? ' on' : '')} onClick=${() => setDlg({ ...dlg, estado: k })}>${x.label}</button>`)}</div>
+      ${dlg.estado === 'cancelado' && html`<p class="warn small">Las canastas vuelven al inventario.</p>`}
+      ${p.estado === 'cancelado' && dlg.estado && html`<p class="info small">Al reactivarlo se vuelven a descontar las canastas del inventario.</p>`}
+      ${['pendiente', 'confirmado', 'preparando'].includes(dlg.estado) && html`<p class="muted small">Si su ruta ya terminó o fue cancelada, el pedido queda disponible para planear otra ruta.</p>`}
+      <${Field} label="Nota (opcional)"><input class="input" value=${dlg.nota} onInput=${(e) => setDlg({ ...dlg, nota: e.target.value })} placeholder="Ej.: se marcó entregado por error" /><//>
+    <//>`}
 
     ${dlg && dlg.t === 'encamino' && html`<${Modal} title="¿Marcar en camino?" onClose=${() => setDlg(null)}
       footer=${html`<button class="btn ghost" onClick=${() => setDlg(null)}>Volver</button>

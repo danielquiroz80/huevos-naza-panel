@@ -10,6 +10,8 @@ export const CONFIG = {
   accionesUrl: 'https://danielquiroz.app.n8n.cloud/webhook/hn-panel-acciones',
   // Genera reportes en Google Sheets (n8n verifica la sesión y que sea Admin; las credenciales de Google viven solo en n8n).
   reportesUrl: 'https://danielquiroz.app.n8n.cloud/webhook/hn-reportes',
+  // Consejos con IA (n8n verifica la sesión y que sea Admin; la clave de Gemini vive solo en n8n).
+  consejosUrl: 'https://danielquiroz.app.n8n.cloud/webhook/hn-consejos',
   // Enlace a la hoja espejo de Google Sheets (solo lectura). Se completa cuando exista.
   hojaUrl: 'https://docs.google.com/spreadsheets/d/14wxxYwbXB0_Nf3Ah0mrs9J-nRppDbJoQu-mw_Z77-D4/edit'
 };
