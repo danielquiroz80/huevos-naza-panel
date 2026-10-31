@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Sigue tu pedido · Huevos de la Naza</title>
+  <meta name="theme-color" content="#F7B016" />
+  <meta name="robots" content="noindex, nofollow" />
+  <link rel="icon" type="image/png" href="assets/favicon.png" />
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+  <style>
+    :root { --amber: #F7B016; --ink: #241F35; --muted: #6E6880; --green: #2E9E6A; --red: #E2463C; --violet: #7B5CC4; --cream: #FFF8EC; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; font-family: 'Plus Jakarta Sans', system-ui, sans-serif; color: var(--ink); background: var(--cream); }
+    #mapa { position: fixed; inset: 0; z-index: 0; background: #EAE6DF; }
+    .top { position: fixed; top: calc(12px + env(safe-area-inset-top)); left: 12px; right: 12px; z-index: 10; display: flex; align-items: center; gap: 10px;
+      background: rgba(255, 255, 255, .95); backdrop-filter: blur(8px); border-radius: 16px; padding: 8px 12px; box-shadow: 0 8px 24px -10px rgba(36, 31, 53, .35); }
+    .top img { width: 36px; height: 36px; border-radius: 50%; }
+    .top b { font-size: 15px; }
+    .top span { display: block; font-size: 12px; color: var(--muted); }
+    .live { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; color: var(--green); }
+    .live i { width: 8px; height: 8px; border-radius: 50%; background: var(--green); animation: p 1.6s infinite; }
+    @keyframes p { 50% { opacity: .3; } }
+    .hoja { position: fixed; left: 0; right: 0; bottom: 0; z-index: 10; background: #fff; border-radius: 24px 24px 0 0; padding: 18px 20px calc(20px + env(safe-area-inset-bottom));
+      box-shadow: 0 -12px 30px -14px rgba(36, 31, 53, .4); max-width: 560px; margin: 0 auto; }
+    .kicker { font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; color: var(--violet); }
+    h1 { font-size: 24px; margin: 4px 0 6px; line-height: 1.2; }
+    .eta { font-size: 40px; font-weight: 800; line-height: 1; margin: 6px 0; }
+    .eta small { font-size: 16px; color: var(--muted); font-weight: 700; }
+    .dir { display: flex; gap: 8px; margin-top: 12px; padding: 12px; background: var(--cream); border-radius: 14px; font-size: 14px; }
+    .dir b { display: block; }
+    .muted { color: var(--muted); font-size: 14px; }
+    .pasos { display: flex; gap: 6px; margin: 14px 0 4px; }
+    .pasos div { flex: 1; height: 6px; border-radius: 9px; background: #EDE9F3; }
+    .pasos div.on { background: var(--amber); }
+    .pin { width: 30px; height: 30px; border-radius: 50%; background: var(--red); border: 3px solid #fff; box-shadow: 0 4px 10px -2px rgba(36,31,53,.5); display: grid; place-items: center; color: #fff; font-size: 14px; }
+    .moto { width: 42px; height: 42px; border-radius: 50%; background: #fff; border: 3px solid var(--violet); display: grid; place-items: center; font-size: 22px; box-shadow: 0 0 0 8px rgba(123, 92, 196, .25); }
+    .leaflet-div-icon { background: none; border: 0; }
+    .ok { color: var(--green); }
+  </style>
+</head>
+<body>
+  <div id="mapa"></div>
+  <div class="top"><img src="assets/logo.png" alt="" /><div><b>Huevos de la Naza</b><span id="sub">Seguimiento de tu pedido</span></div><span class="live" id="live" hidden><i></i>En vivo</span></div>
+  <div class="hoja" id="hoja"><div class="muted">Cargando tu pedido…</div></div>
+  <script type="module">
+    import L from 'https://esm.sh/leaflet@1.9.4';
+    import { CONFIG } from './config.js';
+    const token = new URLSearchParams(location.search).get('t') || '';
+    const $ = (id) => document.getElementById(id);
+    const esc = (t) => String(t == null ? '' : t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const mapa = L.map('mapa', { zoomControl: false, attributionControl: true }).setView([6.2442, -75.5812], 13);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(mapa);
+    const icono = (cls, txt, s) => L.divIcon({ className: '', html: `<div class="${cls}">${txt}</div>`, iconSize: [s, s], iconAnchor: [s / 2, s / 2] });
+    let casa = null, moto = null, linea = null, encuadre = false;
+    const hace = (t) => { const m = Math.round((Date.now() - new Date(t)) / 60000); return m < 1 ? 'hace un momento' : 'hace ' + m + ' min'; };
+
+    async function cargar() {
+      if (!/^[0-9a-f-]{36}$/i.test(token)) return mostrar({ ok: false });
+      try {
+        const r = await fetch(CONFIG.supabaseUrl + '/rest/v1/rpc/seguimiento_pedido', {
+          method: 'POST', headers: { apikey: CONFIG.supabaseKey, Authorization: 'Bearer ' + CONFIG.supabaseKey, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ p_token: token })
+        });
+        mostrar(await r.json());
+      } catch (e) { /* reintenta en el siguiente ciclo */ }
+    }
+
+    function mostrar(d) {
+      const hoja = $('hoja');
+      if (!d || !d.ok) { hoja.innerHTML = '<div class="kicker">Enlace no válido</div><h1>No encontramos este pedido</h1><p class="muted">El enlace puede haber vencido. Escríbenos por el chat si necesitas ayuda.</p>'; return; }
+      if (d.destino && !casa) casa = L.marker([d.destino.lat, d.destino.lng], { icon: icono('pin', '⌂', 30) }).addTo(mapa).bindTooltip('Tu dirección');
+      const u = d.ubicacion;
+      if (u) {
+        if (!moto) moto = L.marker([u.lat, u.lng], { icon: icono('moto', '🛵', 42), zIndexOffset: 1000 }).addTo(mapa);
+        else moto.setLatLng([u.lat, u.lng]);
+        if (d.destino) { const pts = [[u.lat, u.lng], [d.destino.lat, d.destino.lng]]; linea ? linea.setLatLngs(pts) : (linea = L.polyline(pts, { color: '#7B5CC4', weight: 4, dashArray: '6 8' }).addTo(mapa)); }
+      } else if (moto) { mapa.removeLayer(moto); moto = null; if (linea) { mapa.removeLayer(linea); linea = null; } }
+      if (!encuadre) {
+        const pts = [u && [u.lat, u.lng], d.destino && [d.destino.lat, d.destino.lng]].filter(Boolean);
+        if (pts.length > 1) { mapa.fitBounds(pts, { paddingTopLeft: [50, 90], paddingBottomRight: [50, 300], maxZoom: 16 }); encuadre = true; }
+        else if (pts.length) { mapa.setView(pts[0], 15); encuadre = !!u; }
+      }
+      $('live').hidden = !u;
+      const dir = `<div class="dir"><span>📍</span><div><b>${esc(d.direccion)}</b><span class="muted">${esc([d.barrio, d.municipio].filter(Boolean).join(' · '))}</span></div></div>`;
+      const hola = d.cliente && !/^(Cliente|Prueba)$/i.test(d.cliente) ? ', ' + esc(d.cliente) : '';
+      if (d.estado === 'entregado') {
+        hoja.innerHTML = `<div class="kicker ok">Entregado</div><h1>¡Tu pedido #${d.pedido} llegó${hola}! 🥚</h1><p class="muted">Gracias por comprarle a Huevos de la Naza.</p>${dir}`;
+      } else if (d.estado === 'no_entregado') {
+        hoja.innerHTML = `<div class="kicker" style="color:var(--red)">No entregado</div><h1>Hoy no pudimos entregar tu pedido #${d.pedido}</h1><p class="muted">Te escribiremos para acordar una nueva entrega.</p>${dir}`;
+      } else if (d.ruta_estado === 'en_curso') {
+        const siguiente = d.antes === 0;
+        const pasos = Array.from({ length: Math.min(d.antes, 6) + 1 }, (_, i) => `<div class="${i === Math.min(d.antes, 6) ? 'on' : ''}"></div>`).join('');
+        hoja.innerHTML = `<div class="kicker">${siguiente ? 'Eres el siguiente' : 'Tu pedido va en camino'}</div>
+          <h1>${esc(d.repartidor || 'El repartidor')} ${siguiente ? 'va hacia tu dirección' : 'tiene ' + d.antes + ' entrega' + (d.antes === 1 ? '' : 's') + ' antes de la tuya'}</h1>
+          ${d.eta_min != null ? `<div class="eta">${d.eta_min} <small>min aprox.</small></div>` : ''}
+          <div class="pasos">${pasos}</div>
+          <p class="muted">${u ? 'Ubicación actualizada ' + hace(u.en) : 'Esperando la ubicación del repartidor…'}</p>${dir}`;
+      } else {
+        hoja.innerHTML = `<div class="kicker">Pedido #${d.pedido}</div><h1>Tu pedido está listo para el reparto</h1><p class="muted">Cuando el repartidor salga podrás ver aquí dónde viene.</p>${dir}`;
+      }
+    }
+    cargar();
+    setInterval(cargar, 10000);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) cargar(); });
+  </script>
+</body>
+</html>

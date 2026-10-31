@@ -54,11 +54,15 @@ export function Mapa({ origen, destino, paradas = [], height = 320, actual, ubic
   return html`<div ref=${caja} class="mapa" style=${{ height: height + 'px' }}></div>`;
 }
 
-/** Varias rutas a la vez (seguimiento del Admin), cada una con su color y la última ubicación del repartidor. */
-export function MapaRutas({ rutas = [], height = 380 }) {
+/** Varias rutas a la vez (panel de control del Admin): paradas por color y el repartidor en su posición en vivo.
+ *  Solo reencuadra la primera vez o al enfocar un repartidor, para no mover el mapa en cada actualización. */
+export function MapaRutas({ rutas = [], height = 380, foco = null, onFoco }) {
   const caja = useRef(null);
   const [mapa, capa] = useMapa(caja);
-  const firma = JSON.stringify(rutas.map((r) => [r.id, r.color, r.ultima_lat, r.ultima_lng, r.paradas.map((p) => [p.id, p.estado, p.lat])]));
+  const motos = useRef(new Map());
+  const encuadrado = useRef(false);
+  const firma = JSON.stringify(rutas.map((r) => [r.id, r.color, r.estado, r.paradas.map((p) => [p.id, p.estado, p.lat, p.lng])]));
+  // Paradas y recorridos (cambian poco).
   useEffect(() => {
     const m = mapa.current, g = capa.current;
     if (!m) return;
@@ -66,17 +70,44 @@ export function MapaRutas({ rutas = [], height = 380 }) {
     const pts = [];
     rutas.forEach((r) => {
       const linea = [];
-      if (r.origen_lat) linea.push([r.origen_lat, r.origen_lng]);
+      if (r.origen_lat) { linea.push([r.origen_lat, r.origen_lng]); L.marker([r.origen_lat, r.origen_lng], { icon: pin('⌂', 'origen') }).addTo(g).bindTooltip('Salida · ' + r.nombre); }
       r.paradas.forEach((p, i) => {
         if (!p.lat) return;
-        const clase = p.estado === 'entregado' ? 'ok' : p.estado === 'no_entregado' ? 'no' : 'color';
-        L.marker([p.lat, p.lng], { icon: pin(i + 1, clase, r.color) }).addTo(g).bindTooltip(`${r.nombre} · ${i + 1}. ${p.cliente}`);
+        const clase = p.estado === 'entregado' ? 'ok' : p.estado === 'no_entregado' ? 'no' : p.estado === 'en_camino' ? 'actual color' : 'color';
+        L.marker([p.lat, p.lng], { icon: pin(i + 1, clase, r.color) }).addTo(g).bindTooltip(`${r.nombre} · ${i + 1}. ${p.direccion_entrega || p.cliente || ''}`);
         pts.push([p.lat, p.lng]); linea.push([p.lat, p.lng]);
       });
-      if (linea.length > 1) L.polyline(linea, { color: r.color, weight: 4, opacity: 0.7 }).addTo(g);
-      if (r.ultima_lat) { L.marker([r.ultima_lat, r.ultima_lng], { icon: camion(r.color), zIndexOffset: 1000 }).addTo(g).bindTooltip(r.nombre); pts.push([r.ultima_lat, r.ultima_lng]); }
+      if (linea.length > 1) L.polyline(linea, { color: r.color, weight: 4, opacity: r.estado === 'en_curso' ? 0.85 : 0.45, dashArray: r.estado === 'en_curso' ? null : '6 8' }).addTo(g);
+      if (r.ultima_lat) pts.push([r.ultima_lat, r.ultima_lng]);
     });
-    if (pts.length) m.fitBounds(pts, { padding: [36, 36], maxZoom: 14 });
+    if (!encuadrado.current && pts.length) { m.fitBounds(pts, { padding: [40, 40], maxZoom: 14 }); encuadrado.current = true; }
   }, [firma]);
-  return html`<div ref=${caja} class="mapa" style=${{ height: height + 'px' }}></div>`;
+  // Repartidores en vivo: se mueven sin redibujar todo.
+  useEffect(() => {
+    const m = mapa.current;
+    if (!m) return;
+    const vistos = new Set();
+    rutas.forEach((r) => {
+      if (!r.ultima_lat) return;
+      vistos.add(r.id);
+      const mins = r.ultima_ubicacion_en ? Math.round((Date.now() - new Date(r.ultima_ubicacion_en)) / 60000) : null;
+      const txt = `<b>${r.nombre}</b><br>${mins == null ? '' : mins < 1 ? 'Ubicación de hace un momento' : 'Ubicación de hace ' + mins + ' min'}`;
+      let mk = motos.current.get(r.id);
+      if (!mk) { mk = L.marker([r.ultima_lat, r.ultima_lng], { icon: camion(r.color), zIndexOffset: 1000 }).addTo(m); mk.on('click', () => onFoco && onFoco(r.id)); motos.current.set(r.id, mk); }
+      else mk.setLatLng([r.ultima_lat, r.ultima_lng]);
+      mk.bindTooltip(txt, { direction: 'top', offset: [0, -16] });
+      const el = mk.getElement(); if (el) el.style.opacity = mins != null && mins > 5 ? '0.5' : '1';
+    });
+    for (const [id, mk] of motos.current) if (!vistos.has(id)) { m.removeLayer(mk); motos.current.delete(id); }
+  }, [JSON.stringify(rutas.map((r) => [r.id, r.ultima_lat, r.ultima_lng, r.ultima_ubicacion_en, r.nombre]))]);
+  // Enfocar un repartidor o su ruta.
+  useEffect(() => {
+    const m = mapa.current;
+    if (!m || foco == null) return;
+    const r = rutas.find((x) => x.id === foco);
+    if (!r) return;
+    if (r.ultima_lat && r.estado === 'en_curso') m.flyTo([r.ultima_lat, r.ultima_lng], 15, { duration: 0.8 });
+    else { const pts = r.paradas.filter((p) => p.lat).map((p) => [p.lat, p.lng]); if (pts.length) m.flyToBounds(pts, { padding: [40, 40], maxZoom: 15, duration: 0.8 }); }
+  }, [foco]);
+  return html`<div ref=${caja} class="mapa" style=${{ height: typeof height === 'number' ? height + 'px' : height }}></div>`;
 }
