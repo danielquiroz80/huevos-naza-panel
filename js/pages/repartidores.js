@@ -2,7 +2,7 @@ import { html, useState, useEffect, Icon, Card, Tabs, Loader, Empty, ErrorBox, M
 import { sb, q, num, money, fechaCorta, fechaHora, hoyISO, isoDate, sumarDias, sum, norm, usuarios, claveInvalida, REGLAS_CLAVE, sugerirClave, whatsappLink, MOTIVOS, comprimirFoto } from '../lib.js';
 
 export const CUENTA = { activo: ['Activo', 'green'], inactivo: ['Inactivo', 'gray'], suspendido: ['Suspendido', 'red'] };
-export const OPERATIVO = { disponible: ['Disponible', 'green'], con_ruta: ['Con ruta asignada', 'blue'], ocupado: ['En recorrido', 'violet'], fuera_servicio: ['Fuera de servicio', 'gray'] };
+export const OPERATIVO = { disponible: ['Disponible', 'green'], con_ruta: ['Con ruta asignada', 'blue'], ocupado: ['En recorrido', 'violet'], fuera_servicio: ['Deshabilitado', 'gray'] };
 const TRANSPORTE = { moto: 'Moto', carro: 'Carro', bicicleta: 'Bicicleta', a_pie: 'A pie', otro: 'Otro' };
 const DOCS = { CC: 'Cédula de ciudadanía', CE: 'Cédula de extranjería', PPT: 'Permiso de protección temporal', PA: 'Pasaporte', TI: 'Tarjeta de identidad', NIT: 'NIT' };
 const ESTADO_RUTA = { planeada: ['Por iniciar', 'amber'], en_curso: ['En ruta', 'violet'], terminada: ['Finalizada', 'green'], cancelada: ['Cancelada', 'gray'] };
@@ -95,8 +95,8 @@ function RepartidorDetalle({ x, onClose, onCambio }) {
     ${editar && html`<${RepartidorForm} x=${x} onClose=${() => setEditar(false)} onListo=${() => { setEditar(false); onCambio(); }} />`}
     ${dlg && dlg.t === 'cuenta' && html`<${Modal} title="Cuenta y acceso" onClose=${() => setDlg(null)}>
       <div class="opt-list">
-        <div class="opt"><div><b>Disponibilidad</b><span class="muted small">${x.disponibilidad === 'fuera_servicio' ? 'Fuera de servicio: no puede tomar rutas.' : 'Disponible para tomar rutas.'}</span></div>
-          <${AsyncButton} className="btn sm" onClick=${disponibilidad}>${x.disponibilidad === 'fuera_servicio' ? 'Marcar disponible' : 'Fuera de servicio'}<//></div>
+        <div class="opt"><div><b>Habilitado para repartir</b><span class="muted small">${x.disponibilidad === 'fuera_servicio' ? 'Deshabilitado: no puede tomar pedidos ni rutas.' : 'Habilitado: puede tomar pedidos y rutas. Queda así hasta que lo cambies.'}</span></div>
+          <${AsyncButton} className="btn sm" onClick=${disponibilidad}>${x.disponibilidad === 'fuera_servicio' ? 'Habilitar' : 'Deshabilitar'}<//></div>
         <div class="opt"><div><b>Estado de la cuenta</b><span class="muted small">Inactivo o suspendido no puede entrar a la app.</span></div>
           <div class="seg">${Object.entries(CUENTA).map(([k, [l]]) => html`<${AsyncButton} key=${k} className=${'seg-b' + (x.estado_cuenta === k ? ' on' : '')} disabled=${x.estado_cuenta === k} onClick=${() => cambiarEstado(k)}>${l}<//>`)}</div></div>
         <div class="opt"><div><b>Contraseña</b><span class="muted small">Asigna una nueva y compártela con la persona.</span></div>
@@ -244,7 +244,7 @@ function RepartidorForm({ x, onClose, onListo }) {
         <${Field} label="Tipo o modelo de vehículo"><input class="input" value=${f.tipo_vehiculo || ''} onInput=${set('tipo_vehiculo')} placeholder="Ej.: Moto 125 cc con baúl" /><//>
         ${['moto', 'carro'].includes(f.transporte) && html`<${Field} label="Placa *"><input class="input mono" value=${f.placa || ''} onInput=${set('placa')} placeholder="ABC12D" /><//>`}
         <${Field} label="Capacidad de carga" hint="Canastas que puede llevar por ruta."><input class="input" type="number" min="1" inputmode="numeric" value=${f.capacidad_canastas} onInput=${set('capacidad_canastas')} /><//>
-        <${Field} label="Disponibilidad"><select class="input" value=${f.disponibilidad} onChange=${set('disponibilidad')}><option value="disponible">Disponible</option><option value="fuera_servicio">Fuera de servicio</option></select><//>
+        <${Field} label="Habilitado para repartir"><select class="input" value=${f.disponibilidad} onChange=${set('disponibilidad')}><option value="disponible">Habilitado</option><option value="fuera_servicio">Deshabilitado</option></select><//>
       </div>
       <${Field} label="Observaciones"><textarea class="input" rows="2" value=${f.observaciones || ''} onInput=${set('observaciones')}></textarea><//></div>
     ${nuevo && html`<div class="form-sec"><div class="section-title"><${Icon} n="lock" size=${14} />Acceso a la app</div>

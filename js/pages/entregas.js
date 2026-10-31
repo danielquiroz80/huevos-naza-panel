@@ -52,7 +52,7 @@ function PuntosRuta({ origen, setOrigen, destino, setDestino, mismo, setMismo, d
 function BotonOrdenar({ onClick, disabled, google, texto }) {
   return html`<${AsyncButton} className="btn-ordenar" disabled=${disabled} onClick=${onClick}>
     <span class="bo-ico"><${Icon} n="spark" size=${22} /></span>
-    <span class="bo-txt"><b>${texto || 'Ordenar ruta más rápida'}</b><small>${google ? 'Calcula el mejor orden con el tráfico actual' : 'Orden aproximado por distancia (falta la clave de Google Maps)'}</small></span>
+    <span class="bo-txt"><b>${texto || 'Generar la ruta más rápida'}</b><small>${google ? 'Calcula el mejor orden con el tráfico actual' : 'Orden aproximado por distancia (falta la clave de Google Maps)'}</small></span>
   <//>`;
 }
 
@@ -116,7 +116,7 @@ function Paquetes({ dia, origen, admin, perfil, bloqueado, onListo }) {
   const [abierto, setAbierto] = useState(null);
   const [crear, setCrear] = useState(false);
   const [dlg, setDlg] = useState(null);
-  useEffect(() => { if (r.data) setSel(r.data.reps.filter((x) => !x.ruta_estado && x.habilitacion === 'aprobada').map((x) => x.email)); setPlan(null); }, [r.data]);
+  useEffect(() => { if (r.data) setSel(r.data.reps.filter((x) => !x.ruta_estado).map((x) => x.email)); setPlan(null); }, [r.data]);
   useEffect(() => { if (!admin || !dia) return; const t = setInterval(() => r.reload(), 30000); return () => clearInterval(t); }, [dia]);
   if (!dia) return null;
   if (r.error) return html`<${ErrorBox} error=${r.error} onRetry=${r.reload} />`;
@@ -127,12 +127,7 @@ function Paquetes({ dia, origen, admin, perfil, bloqueado, onListo }) {
   const tengo = bloqueado || perfil && rutas.some((x) => x.repartidor === perfil.email && ['planeada', 'en_curso'].includes(x.estado));
   const libresReps = reps.filter((x) => !x.ruta_estado);
   const elegidos = libresReps.filter((x) => sel.includes(x.email));
-  const toggle = async (e) => {
-    const si = !sel.includes(e);
-    try { await q(sb.rpc('panel_habilitar', { p_fecha: dia, p_email: e, p_si: si })); } catch (err) { toast(err.message, 'error'); return; }
-    setPlan(null); setSel(si ? [...sel, e] : sel.filter((x) => x !== e));
-    toast(si ? 'Repartidor habilitado para este día' : 'Repartidor deshabilitado para este día');
-  };
+  const toggle = (e) => { setPlan(null); setSel(sel.includes(e) ? sel.filter((x) => x !== e) : [...sel, e]); };
   const sugerir = () => {
     if (!elegidos.length) return toast('Elige al menos un repartidor', 'error');
     const { grupos, quedan: q2 } = repartir(pedidos, elegidos, origen);
@@ -152,6 +147,7 @@ function Paquetes({ dia, origen, admin, perfil, bloqueado, onListo }) {
     toast(dlg.t === 'deshacer' ? 'Ruta deshecha: sus pedidos quedaron libres' : 'Ruta liberada: vuelve a estar disponible'); setDlg(null); r.reload(); onListo && admin && onListo();
   };
   const reiniciar = async () => { const n = await q(sb.rpc('panel_reiniciar_reparto', { p_fecha: dia })); toast('Reparto reiniciado: ' + n + ' pedido(s) quedaron libres'); setDlg(null); r.reload(); onListo && onListo(); };
+  if (!admin && !rutas.length) return null;
   const porId = new Map(pedidos.map((p) => [p.id, p]));
   const total = sum(pedidos, 'canastas');
   const verCrear = admin; // solo el Admin reparte pedidos entre repartidores
@@ -177,12 +173,12 @@ function Paquetes({ dia, origen, admin, perfil, bloqueado, onListo }) {
     <//>
 
     ${verCrear && pedidos.length > 0 && html`<${Card} title="Repartir pedidos" icon="users">
-      <p class="muted small">${pedidos.length} pedidos · ${num(total)} canastas sin ruta tomada. ¿Quiénes salen a repartir? Los que marques quedan <b>habilitados</b> ese día y ven su ruta en el celular.</p>
+      <p class="muted small">${pedidos.length} pedidos · ${num(total)} canastas sin ruta tomada. ¿Quiénes salen a repartir? (Solo aparecen los repartidores habilitados.)</p>
       <div class="rep-chips">${reps.map((x) => {
         const ocu = !!x.ruta_estado, on = sel.includes(x.email) && !ocu;
         return html`<button key=${x.email} class=${'rep-chip' + (on ? ' on' : '')} disabled=${ocu} onClick=${() => toggle(x.email)}>
           <span class="rc-check"><${Icon} n=${on ? 'check' : 'plus'} size=${14} /></span>
-          <span><b>${nombre(x)}${perfil && x.email === perfil.email ? ' (tú)' : ''}</b><small>${ocu ? (x.ruta_estado === 'en_curso' ? 'En recorrido' : 'Ya tiene ruta asignada') : x.habilitacion === 'solicitada' && !on ? 'Pidió ser habilitado' : x.capacidad_canastas ? 'Hasta ' + x.capacidad_canastas + ' canastas' : 'Sin capacidad definida'}</small></span></button>`;
+          <span><b>${nombre(x)}${perfil && x.email === perfil.email ? ' (tú)' : ''}</b><small>${ocu ? (x.ruta_estado === 'en_curso' ? 'En recorrido' : 'Ya tiene ruta asignada') : x.capacidad_canastas ? 'Hasta ' + x.capacidad_canastas + ' canastas' : 'Sin capacidad definida'}</small></span></button>`;
       })}</div>
       <div class="auto-pie">
         <span>${elegidos.length === 0 ? 'Ningún repartidor elegido' : elegidos.length === 1 ? html`<b>1 repartidor</b>: una sola ruta hasta llenar su capacidad` : html`<b>${elegidos.length} repartidores</b>: ${elegidos.length} rutas equilibradas por zona y capacidad`}
@@ -887,7 +883,7 @@ function RutaActiva({ perfil, rutaId, onDisponibles }) {
   if (r.error && !r.data) return html`<${ErrorBox} error=${r.error} onRetry=${r.reload} />`;
   const { ruta, paradas } = r.data;
   if (!ruta && gestor) return html`<${Card}><${Empty} icon="truck" title="No encontramos la ruta">Puede que se haya eliminado.<//><//>`;
-  if (!ruta) return html`<${Card}><${Empty} icon="route" title="No tienes una ruta activa">Toma una de las rutas que el Admin publicó para ti.<//>
+  if (!ruta) return html`<${Card}><${Empty} icon="route" title="No tienes una ruta activa">Toma pedidos de la bolsa en "Disponibles" para armar tu ruta.<//>
     <div class="center"><button class="btn primary" onClick=${onDisponibles}><${Icon} n="truck" size=${16} />Ver rutas disponibles</button></div><//>`;
   if (!gestor && editarPedidos) return html`<${TomarPedidos} perfil=${perfil} ruta=${ruta} actuales=${paradas.filter((p) => ABIERTA.includes(p.estado))}
     onListo=${() => { setEditarPedidos(false); r.reload(); }} onCancelar=${() => setEditarPedidos(false)} />`;
@@ -1091,21 +1087,21 @@ function SolicitudesHab({ onCambio }) {
   const resolver = async (x, si) => { await q(sb.rpc('panel_habilitar', { p_fecha: x.fecha, p_email: x.email, p_si: si })); toast(si ? x.nombre + ' quedó habilitado' : 'Solicitud negada'); r.reload(); onCambio && onCambio(); };
   return html`<${Card} title=${'Solicitudes de habilitación · ' + lista.length} icon="idcard" className="hab-card">
     <div class="list">${lista.map((x) => html`<div key=${x.id} class="row-item static wrap">
-      <div class="ri-main"><b>${x.nombre}</b><span class="ri-meta">Pide repartir el ${fechaLarga(x.fecha)}</span></div>
+      <div class="ri-main"><b>${x.nombre}</b><span class="ri-meta">Pide ser habilitado para repartir · ${fechaHora(x.solicitada_en)}</span></div>
       <div class="row-btns"><${AsyncButton} className="btn sm danger-ghost" onClick=${() => resolver(x, false)}>Negar<//><${AsyncButton} className="btn sm primary" icon="check" onClick=${() => resolver(x, true)}>Aprobar<//></div>
     </div>`)}</div>
   <//>`;
 }
 
-/** Repartidor: aviso cuando no está habilitado ese día. */
-function NoHabilitado({ dia, estado, onCambio }) {
-  const solicitar = async () => { await q(sb.rpc('panel_solicitar_habilitacion', { p_fecha: dia })); toast('Solicitud enviada al administrador'); onCambio(); };
+/** Repartidor: aviso cuando el Admin lo tiene deshabilitado. */
+function NoHabilitado({ estado, onCambio }) {
+  const solicitar = async () => { await q(sb.rpc('panel_solicitar_habilitacion', { p_fecha: null })); toast('Solicitud enviada al administrador'); onCambio(); };
   return html`<${Card}><div class="no-hab">
     <span class="no-hab-ico"><${Icon} n="lock" size=${26} /></span>
-    <h3>${estado === 'solicitada' ? 'Solicitud enviada' : 'No estás habilitado para este día'}</h3>
-    <p class="muted">${estado === 'solicitada' ? 'El administrador debe aprobarla. Cuando lo haga, aquí verás tu ruta.'
-      : estado === 'negada' ? 'El administrador no aprobó tu solicitud para el ' + fechaLarga(dia) + '. Si crees que es un error, puedes volver a pedirla.'
-      : 'El administrador te deshabilitó o aún no te habilita para el ' + fechaLarga(dia) + '. Solicita ser habilitado para poder tomar una ruta.'}</p>
+    <h3>${estado === 'solicitada' ? 'Solicitud enviada' : 'Estás deshabilitado'}</h3>
+    <p class="muted">${estado === 'solicitada' ? 'El administrador debe aprobarla. Cuando lo haga, aquí verás los pedidos por repartir.'
+      : estado === 'negada' ? 'El administrador no aprobó tu solicitud. Si crees que es un error, puedes volver a pedirla.'
+      : 'El administrador te deshabilitó para repartir. Solicita ser habilitado para poder tomar pedidos.'}</p>
     ${estado === 'solicitada' ? html`<button class="btn" onClick=${onCambio}><${Icon} n="refresh" size=${16} />Revisar de nuevo</button>`
       : html`<${AsyncButton} className="btn primary big" icon="bell" onClick=${solicitar}>${estado === 'negada' ? 'Volver a solicitar' : 'Solicitar ser habilitado'}<//>`}
   </div><//>`;
@@ -1119,8 +1115,8 @@ function TomarPedidos({ perfil, ruta, actuales = [], onListo, onCancelar }) {
   const [dia, setDia] = useState(ruta ? ruta.fecha : '');
   useEffect(() => { if (!dia && fechas.length) setDia(fechas.includes(hoyISO()) ? hoyISO() : fechas[0]); }, [r.data]);
   const [sel, setSel] = useState(() => actuales.map((p) => p.id));
-  const hab = useAsync(() => ruta || !dia ? Promise.resolve(null) : q(sb.rpc('panel_habilitaciones', { p_fecha: dia })).then((x) => (x[0] || {}).estado || null), [dia]);
-  const habilitado = !!ruta || hab.data === 'aprobada';
+  const hab = useAsync(() => ruta ? Promise.resolve(null) : q(sb.rpc('panel_mi_habilitacion')), []);
+  const habilitado = !!ruta || !!(hab.data && hab.data.habilitado);
   const lista = actuales.concat((r.data || []).filter((p) => p.fecha_entrega === dia && !p.repartidor && !p.ruta_id && !actuales.some((a) => a.id === p.id)));
   const elegidos = lista.filter((p) => sel.includes(p.id));
   const canastas = sum(elegidos, 'canastas'), cap = Number(perfil.capacidad_canastas) || 0;
@@ -1133,24 +1129,24 @@ function TomarPedidos({ perfil, ruta, actuales = [], onListo, onCancelar }) {
     await q(sb.rpc('panel_guardar_ruta', { p_ruta: ruta ? ruta.id : null, p_fecha: ruta ? ruta.fecha : dia, p_repartidor: perfil.email, p_origen_texto: o.texto || null, p_origen_lat: o.lat || null, p_origen_lng: o.lng || null,
       p_volver: ruta ? ruta.volver_origen !== false : true, p_paradas: orden.map((p) => ({ id: p.id, lat: p.lat || null, lng: p.lng || null, minutos: null })),
       p_destino_texto: ruta ? ruta.destino_texto : null, p_destino_lat: ruta ? ruta.destino_lat : null, p_destino_lng: ruta ? ruta.destino_lng : null }));
-    toast(ruta ? 'Pedidos de tu ruta actualizados' : '¡Ruta creada! Ahora confirma tu carga y ordénala.');
+    toast(ruta ? 'Pedidos de tu ruta actualizados' : '¡Pedidos tomados! Ahora valida tu carga y genera la ruta.');
     onListo();
   };
 
-  return html`<div class=${'stack ruta-view' + (ruta ? ' con-barra' : '')}>
-    <section class="ruta-head"><div><span class="hero-kicker">${ruta ? fechaLarga(ruta.fecha) : 'Rutas disponibles'}</span>
-      <h2>${ruta ? 'Pedidos de tu ruta' : 'Rutas para ti'}</h2><span>${ruta ? 'Elige los pedidos que vas a entregar.' : 'Toma una de las rutas que el Admin publicó para ti.'}</span></div></section>
+  return html`<div class=${'stack ruta-view' + (ruta || (!bloqueado && habilitado) ? ' con-barra' : '')}>
+    <section class="ruta-head"><div><span class="hero-kicker">${ruta ? fechaLarga(ruta.fecha) : 'Bolsa de pedidos'}</span>
+      <h2>${ruta ? 'Pedidos de tu ruta' : 'Pedidos por repartir'}</h2><span>${ruta ? 'Elige los pedidos que vas a entregar.' : 'Toma los pedidos que vas a entregar. Los que tome otro repartidor desaparecen de aquí.'}</span></div></section>
     ${bloqueado && html`<div class="info"><${Icon} n="route" size=${16} /><span>Ya tienes la ruta R-${mia.data.id} (${mia.data.estado === 'en_curso' ? 'en recorrido' : 'por iniciar'}). Para tomar otra, libérala primero en "Mi ruta".</span></div>`}
+    ${!ruta && !bloqueado && !hab.data && html`<${Loader} rows=${3} />`}
+    ${!ruta && !bloqueado && hab.data && !habilitado && html`<${NoHabilitado} estado=${hab.data.solicitud} onCambio=${hab.reload} />`}
     <${ErrorBox} error=${r.error} onRetry=${r.reload} />
-    ${!r.data ? html`<${Loader} rows=${5} />` : !lista.length && !fechas.length ? html`<${Card}><${Empty} icon="check" title="No hay pedidos por entregar">Cuando el Admin publique rutas para ti aparecerán aquí.<//>
+    ${!(ruta || bloqueado || habilitado) ? null : !r.data ? html`<${Loader} rows=${5} />` : !lista.length && !fechas.length ? html`<${Card}><${Empty} icon="check" title="No hay pedidos por entregar">Cuando lleguen pedidos por entregar aparecerán aquí.<//>
         <div class="center"><button class="btn" onClick=${r.reload}><${Icon} n="refresh" size=${16} />Revisar de nuevo</button></div><//>` : html`
       ${!ruta && html`<${Field} label="Día de entrega"><select class="input" value=${dia} onChange=${(e) => { setDia(e.target.value); setSel([]); }}>
         ${fechas.map((f) => html`<option value=${f}>${fechaLarga(f)}${f === hoyISO() ? ' (hoy)' : ''}</option>`)}</select><//>`}
-      ${!ruta && dia && !bloqueado && hab.loading && html`<${Loader} rows=${2} />`}
-      ${!ruta && dia && !bloqueado && !hab.loading && !habilitado && html`<${NoHabilitado} key=${dia} dia=${dia} estado=${hab.data} onCambio=${hab.reload} />`}
       ${!ruta && dia && (bloqueado || habilitado) && html`<${Paquetes} key=${dia} dia=${dia} origen=${leerOrigen()} perfil=${perfil} bloqueado=${bloqueado} onListo=${onListo} />
-        `}
-      ${ruta && html`<${Card} title=${lista.length + ' pedido(s) libres'} icon="pedidos" pad=${false}
+        ${lista.length > 0 && !bloqueado && html`<div class="section-title">Pedidos libres · los más antiguos primero</div>`}`}
+      ${(ruta || (!bloqueado && habilitado)) && html`<${Card} title=${lista.length + ' pedido(s) libres'} icon="pedidos" pad=${false}
         action=${lista.length > 0 && html`<button class="btn sm ghost" onClick=${() => setSel(sel.length === lista.length ? [] : lista.map((p) => p.id))}>${sel.length === lista.length ? 'Quitar todos' : 'Elegir todos'}</button>`}>
         ${!lista.length ? html`<${Empty} icon="check" title="No hay pedidos libres ese día" />` :
         html`<div class="checklist pad">${lista.map((p) => html`<label key=${p.id} class=${'check-item' + (sel.includes(p.id) ? ' on' : '')}>
@@ -1159,10 +1155,10 @@ function TomarPedidos({ perfil, ruta, actuales = [], onListo, onCancelar }) {
             <span class="ri-meta">${p.cliente} · #${p.id}${(p.items || []).length ? ' · ' + p.items.map((it) => it.cantidad + ' ' + it.producto).join(', ') : ''}</span></span>
           <b>${num(p.canastas)}<small class="muted"> can.</small></b></label>`)}</div>`}
       <//>`}`}
-    ${ruta && html`<div class="entrega-bar">
+    ${(ruta || (!bloqueado && habilitado)) && html`<div class="entrega-bar">
       ${onCancelar ? html`<button class="btn ghost" onClick=${onCancelar}>Cancelar</button>` : html`<div class="ab-info dark"><b>${elegidos.length} pedidos</b><span>${num(canastas)}${cap ? ' de ' + cap : ''} canastas</span></div>`}
       <${AsyncButton} className="btn primary" icon="check" disabled=${!r.data || (!ruta && !elegidos.length) || (cap > 0 && canastas > cap)} onClick=${guardar}>
-        ${ruta ? 'Guardar (' + elegidos.length + ')' : 'Crear mi ruta (' + elegidos.length + ')'}<//>
+        ${ruta ? 'Guardar (' + elegidos.length + ')' : 'Tomar pedidos (' + elegidos.length + ')'}<//>
     </div>`}
     ${cap > 0 && canastas > cap && html`<div class="warn"><${Icon} n="alert" size=${16} />Elegiste ${num(canastas)} canastas y tu capacidad es de ${cap}. Quita algunos pedidos para continuar.</div>`}
   </div>`;
