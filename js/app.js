@@ -319,5 +319,13 @@ raiz.innerHTML = '';
 render(html`<${App} />`, raiz);
 
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
-  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+  // Cuando se publica una versión nueva, la app se recarga sola para usarla.
+  const habia = !!navigator.serviceWorker.controller;
+  let recargando = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (habia && !recargando) { recargando = true; location.reload(); } });
+  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').then((reg) => {
+    const revisar = () => reg.update().catch(() => {});
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) revisar(); });
+    setInterval(revisar, 10 * 60000);
+  }).catch(() => {}));
 }

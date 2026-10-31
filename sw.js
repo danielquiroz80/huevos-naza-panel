@@ -1,6 +1,6 @@
 // Service worker mínimo: guarda la "cáscara" de la app para que abra rápido e instalable.
 // Los datos siempre se piden en vivo a Supabase (nunca se guardan en caché).
-const CACHE = 'naza-panel-v6';
+const CACHE = 'naza-panel-v7';
 const SHELL = ['./', 'index.html', 'styles.css', 'config.js', 'js/app.js', 'js/lib.js', 'js/ui.js', 'js/bio.js', 'js/mapa.js',
   'assets/logo.png', 'assets/icon-192.png', 'manifest.webmanifest'];
 
@@ -20,7 +20,7 @@ self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET' || url.origin !== self.location.origin) return;
   // Red primero, caché como respaldo (así cada publicación nueva se ve de inmediato).
   e.respondWith(
-    fetch(e.request)
+    fetch(e.request.mode === 'navigate' ? e.request : new Request(e.request, { cache: 'no-cache' }))
       .then((r) => { const copy = r.clone(); caches.open(CACHE).then((c) => c.put(e.request, copy)); return r; })
       .catch(() => caches.match(e.request))
   );

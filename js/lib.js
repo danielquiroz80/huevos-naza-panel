@@ -122,6 +122,7 @@ export async function salir() {
   await registrarEvento('salida');
   sessionStorage.removeItem('naza_desbloqueado');
   await sb.auth.signOut();
+  location.replace(location.pathname + '#/'); location.reload(); // carga siempre la versión más reciente
 }
 
 /** Gestión de usuarios (función segura de Supabase, solo Admin). */
