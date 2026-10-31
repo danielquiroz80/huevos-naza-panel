@@ -1072,3 +1072,7 @@ button.kpi { font: inherit; color: inherit; text-align: left; width: 100%; curso
   .salud { flex-direction: column; text-align: center; }
   .seg-grande button, .estado-op { font-size: 15px; }
 }
+
+/* Evita que una fila ancha (pestañas, tablas) ensanche toda la pantalla en el celular */
+.stack { grid-template-columns: minmax(0, 1fr); }
+.toolbar > .tabs { min-width: 0; }
