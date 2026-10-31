@@ -104,7 +104,7 @@ const estadoRuta = (x) => x.estado === 'en_curso' ? ['En ruta', 'violet'] : x.es
   : !x.repartidor ? ['Disponible', 'amber'] : x.carga_confirmada ? ['Tomada · carga lista', 'blue'] : ['Tomada', 'blue'];
 
 /** Rutas del día (disponibles, tomadas, en recorrido) y creación de paquetes según los repartidores que salen. */
-function Paquetes({ dia, origen, admin, perfil, onListo }) {
+function Paquetes({ dia, origen, admin, perfil, bloqueado, onListo }) {
   const r = useAsync(async () => {
     if (!dia) return null;
     const [reps, pedidos, rutas] = await Promise.all([q(sb.rpc('panel_repartidores', { p_fecha: dia })), q(sb.rpc('panel_pedidos_disponibles', { p_fecha: dia })), q(sb.rpc('panel_paquetes', { p_fecha: dia }))]);
@@ -116,7 +116,7 @@ function Paquetes({ dia, origen, admin, perfil, onListo }) {
   const [abierto, setAbierto] = useState(null);
   const [crear, setCrear] = useState(false);
   const [dlg, setDlg] = useState(null);
-  useEffect(() => { if (r.data) setSel(r.data.reps.filter((x) => !x.ruta_estado || x.ruta_estado === 'planeada').map((x) => x.email)); setPlan(null); }, [r.data]);
+  useEffect(() => { if (r.data) setSel(r.data.reps.filter((x) => !x.ruta_estado).map((x) => x.email)); setPlan(null); }, [r.data]);
   useEffect(() => { if (!admin || !dia) return; const t = setInterval(() => r.reload(), 30000); return () => clearInterval(t); }, [dia]);
   if (!dia) return null;
   if (r.error) return html`<${ErrorBox} error=${r.error} onRetry=${r.reload} />`;
@@ -124,8 +124,8 @@ function Paquetes({ dia, origen, admin, perfil, onListo }) {
   const { reps, pedidos, rutas } = r.data;
   const nombre = (x) => x.nombre || x.usuario;
   const disponibles = rutas.filter((x) => !x.repartidor && x.estado === 'planeada');
-  const tengo = perfil && rutas.some((x) => x.repartidor === perfil.email);
-  const libresReps = reps.filter((x) => !x.ruta_estado || x.ruta_estado === 'planeada');
+  const tengo = bloqueado || perfil && rutas.some((x) => x.repartidor === perfil.email && ['planeada', 'en_curso'].includes(x.estado));
+  const libresReps = reps.filter((x) => !x.ruta_estado);
   const elegidos = libresReps.filter((x) => sel.includes(x.email));
   const toggle = (e) => { setPlan(null); setSel(sel.includes(e) ? sel.filter((x) => x !== e) : [...sel, e]); };
   const sugerir = () => {
@@ -149,12 +149,12 @@ function Paquetes({ dia, origen, admin, perfil, onListo }) {
   const reiniciar = async () => { const n = await q(sb.rpc('panel_reiniciar_reparto', { p_fecha: dia })); toast('Reparto reiniciado: ' + n + ' pedido(s) quedaron libres'); setDlg(null); r.reload(); onListo && onListo(); };
   const porId = new Map(pedidos.map((p) => [p.id, p]));
   const total = sum(pedidos, 'canastas');
-  const verCrear = admin || crear || (!disponibles.length && pedidos.length > 0);
+  const verCrear = admin; // solo el Admin reparte pedidos entre repartidores
 
   return html`<div class="stack">
     <${Card} title=${'Rutas del ' + fechaCorta(dia)} icon="truck" pad=${false}
       action=${admin && rutas.some((x) => x.estado === 'planeada') && html`<button class="btn sm danger-ghost" onClick=${() => setDlg({ t: 'reiniciar' })}><${Icon} n="refresh" size=${14} />Empezar de nuevo</button>`}>
-      ${!rutas.length ? html`<${Empty} icon="truck" title="Aún no hay rutas">${pedidos.length ? 'Elige quiénes salen hoy y sugiere los paquetes.' : 'No hay pedidos por repartir.'}<//>` :
+      ${!rutas.length ? html`<${Empty} icon="truck" title="Aún no hay rutas">${!admin ? 'El Admin aún no ha publicado rutas para este día.' + (pedidos.length ? ' Puedes armar tu propia ruta con los pedidos libres.' : '') : pedidos.length ? 'Elige quiénes salen hoy y sugiere los paquetes.' : 'No hay pedidos por repartir.'}<//>` :
       html`<div class="list">${rutas.map((x) => {
         const [et, tone] = estadoRuta(x), mia = perfil && x.repartidor === perfil.email, sugeridaMia = perfil && x.sugerido_para === perfil.email;
         return html`<div key=${x.id} class=${'row-item static wrap ruta-item' + (sugeridaMia && !x.repartidor ? ' destacada' : '')}>
@@ -168,16 +168,16 @@ function Paquetes({ dia, origen, admin, perfil, onListo }) {
             ${admin && !x.repartidor && x.estado === 'planeada' && html`<button class="btn sm danger-ghost" onClick=${() => setDlg({ t: 'deshacer', x })}>Deshacer</button>`}</div>
         </div>`;
       })}</div>`}
-      ${!verCrear && pedidos.length > 0 && html`<div class="card-body"><button class="link" onClick=${() => setCrear(true)}><${Icon} n="spark" size=${14} />Rehacer los paquetes disponibles</button></div>`}
+      ${admin && !verCrear && pedidos.length > 0 && html`<div class="card-body"><button class="link" onClick=${() => setCrear(true)}><${Icon} n="spark" size=${14} />Rehacer los paquetes disponibles</button></div>`}
     <//>
 
     ${verCrear && pedidos.length > 0 && html`<${Card} title="Repartir pedidos" icon="users">
       <p class="muted small">${pedidos.length} pedidos · ${num(total)} canastas sin ruta tomada. ¿Quiénes salen a repartir?</p>
       <div class="rep-chips">${reps.map((x) => {
-        const ocu = x.ruta_estado && x.ruta_estado !== 'planeada', on = sel.includes(x.email) && !ocu;
+        const ocu = !!x.ruta_estado, on = sel.includes(x.email) && !ocu;
         return html`<button key=${x.email} class=${'rep-chip' + (on ? ' on' : '')} disabled=${ocu} onClick=${() => toggle(x.email)}>
           <span class="rc-check"><${Icon} n=${on ? 'check' : 'plus'} size=${14} /></span>
-          <span><b>${nombre(x)}${perfil && x.email === perfil.email ? ' (tú)' : ''}</b><small>${ocu ? 'Ya está en recorrido' : x.capacidad_canastas ? 'Hasta ' + x.capacidad_canastas + ' canastas' : 'Sin capacidad definida'}</small></span></button>`;
+          <span><b>${nombre(x)}${perfil && x.email === perfil.email ? ' (tú)' : ''}</b><small>${ocu ? (x.ruta_estado === 'en_curso' ? 'En recorrido' : 'Ya tiene ruta asignada') : x.capacidad_canastas ? 'Hasta ' + x.capacidad_canastas + ' canastas' : 'Sin capacidad definida'}</small></span></button>`;
       })}</div>
       <div class="auto-pie">
         <span>${elegidos.length === 0 ? 'Ningún repartidor elegido' : elegidos.length === 1 ? html`<b>1 repartidor</b>: una sola ruta hasta llenar su capacidad` : html`<b>${elegidos.length} repartidores</b>: ${elegidos.length} rutas equilibradas por zona y capacidad`}
@@ -1109,7 +1109,7 @@ function TomarPedidos({ perfil, ruta, actuales = [], onListo, onCancelar }) {
         <div class="center"><button class="btn" onClick=${r.reload}><${Icon} n="refresh" size=${16} />Revisar de nuevo</button></div><//>` : html`
       ${!ruta && html`<${Field} label="Día de entrega"><select class="input" value=${dia} onChange=${(e) => { setDia(e.target.value); setSel([]); }}>
         ${fechas.map((f) => html`<option value=${f}>${fechaLarga(f)}${f === hoyISO() ? ' (hoy)' : ''}</option>`)}</select><//>`}
-      ${!ruta && dia && html`<${Paquetes} key=${dia} dia=${dia} origen=${leerOrigen()} perfil=${perfil} onListo=${onListo} />
+      ${!ruta && dia && html`<${Paquetes} key=${dia} dia=${dia} origen=${leerOrigen()} perfil=${perfil} bloqueado=${bloqueado} onListo=${onListo} />
         ${lista.length > 0 && !bloqueado && html`<div class="section-title">O arma tu ruta eligiendo pedidos libres</div>`}`}
       ${!bloqueado && html`<${Card} title=${lista.length + ' pedido(s) libres'} icon="pedidos" pad=${false}
         action=${lista.length > 0 && html`<button class="btn sm ghost" onClick=${() => setSel(sel.length === lista.length ? [] : lista.map((p) => p.id))}>${sel.length === lista.length ? 'Quitar todos' : 'Elegir todos'}</button>`}>
@@ -1122,10 +1122,10 @@ function TomarPedidos({ perfil, ruta, actuales = [], onListo, onCancelar }) {
       <//>`}`}
     ${!bloqueado && html`<div class="entrega-bar">
       ${onCancelar ? html`<button class="btn ghost" onClick=${onCancelar}>Cancelar</button>` : html`<div class="ab-info dark"><b>${elegidos.length} pedidos</b><span>${num(canastas)}${cap ? ' de ' + cap : ''} canastas</span></div>`}
-      <${AsyncButton} className="btn primary" icon="check" disabled=${!r.data || (!ruta && !elegidos.length)} onClick=${guardar}>
+      <${AsyncButton} className="btn primary" icon="check" disabled=${!r.data || (!ruta && !elegidos.length) || (cap > 0 && canastas > cap)} onClick=${guardar}>
         ${ruta ? 'Guardar (' + elegidos.length + ')' : 'Crear mi ruta (' + elegidos.length + ')'}<//>
     </div>`}
-    ${cap > 0 && canastas > cap && html`<div class="warn"><${Icon} n="alert" size=${16} />Llevas ${num(canastas)} canastas y tu capacidad es ${cap}.</div>`}
+    ${cap > 0 && canastas > cap && html`<div class="warn"><${Icon} n="alert" size=${16} />Elegiste ${num(canastas)} canastas y tu capacidad es de ${cap}. Quita algunos pedidos para continuar.</div>`}
   </div>`;
 }
 
