@@ -433,6 +433,8 @@ export function MiRuta({ perfil, rutaId }) {
   }, [rutaId]);
   const [dlg, setDlg] = useState(null);
   const [verMapa, setVerMapa] = useState(false);
+  const [nueva, setNueva] = useState(false);
+  const [editarPedidos, setEditarPedidos] = useState(false);
   const [yo, setYo] = useState(null);
 
   // Mientras la ruta está en curso, el repartidor comparte su ubicación (solo con la app abierta).
@@ -451,8 +453,10 @@ export function MiRuta({ perfil, rutaId }) {
   if (r.loading && !r.data) return html`<${Loader} rows=${6} />`;
   if (r.error && !r.data) return html`<${ErrorBox} error=${r.error} onRetry=${r.reload} />`;
   const { ruta, paradas } = r.data;
-  if (!ruta) return html`<${Card}><${Empty} icon="truck" title="Aún no tienes una ruta asignada">Cuando la oficina te asigne entregas, las verás aquí.<//>
-    <div class="center"><button class="btn" onClick=${r.reload}><${Icon} n="refresh" size=${16} />Revisar de nuevo</button></div><//>`;
+  if (!ruta && gestor) return html`<${Card}><${Empty} icon="truck" title="No encontramos la ruta">Puede que se haya eliminado.<//><//>`;
+  if (!ruta || (!gestor && nueva)) return html`<${TomarPedidos} perfil=${perfil} onListo=${() => { setNueva(false); r.reload(); }} onCancelar=${ruta ? () => setNueva(false) : null} />`;
+  if (!gestor && editarPedidos) return html`<${TomarPedidos} perfil=${perfil} ruta=${ruta} actuales=${paradas.filter((p) => ABIERTA.includes(p.estado))}
+    onListo=${() => { setEditarPedidos(false); r.reload(); }} onCancelar=${() => setEditarPedidos(false)} />`;
 
   const pendientes = paradas.filter((p) => ABIERTA.includes(p.estado));
   const actual = pendientes.find((p) => p.estado === 'en_camino') || pendientes[0] || null;
@@ -476,7 +480,7 @@ export function MiRuta({ perfil, rutaId }) {
       <div class="ruta-ring" style=${{ '--p': pct }}><b>${pct}%</b></div>
     </section>
 
-    ${ruta.estado === 'planeada' && pendientes.length > 0 && html`<${PrepararRuta} ruta=${ruta} pendientes=${pendientes} gestor=${gestor} onCambio=${r.reload} />`}
+    ${ruta.estado === 'planeada' && pendientes.length > 0 && html`<${PrepararRuta} ruta=${ruta} pendientes=${pendientes} gestor=${gestor} onCambio=${r.reload} onPedidos=${gestor ? null : () => setEditarPedidos(true)} />`}
 
     ${actual ? html`<section class="parada-actual">
       <div class="pa-top"><span class="pa-num">${paradas.indexOf(actual) + 1}</span>
@@ -501,7 +505,8 @@ export function MiRuta({ perfil, rutaId }) {
       <div class="empty-ico big"><${Icon} n="check" size=${34} /></div>
       <h3>¡Recorrido completo!</h3>
       <p>${ok} entregados${paradas.length - ok ? ' · ' + (paradas.length - ok) + ' no entregados' : ''}${ruta.iniciada_en && ruta.terminada_en ? ' · ' + Math.round((new Date(ruta.terminada_en) - new Date(ruta.iniciada_en)) / 60000) + ' min en ruta' : ''}</p>
-      <p class="muted">¡Buen trabajo! 🥚</p>
+      <p class="muted">${ruta.estado === 'planeada' ? 'Tu ruta no tiene pedidos todavía.' : '¡Buen trabajo! 🥚'}</p>
+      ${!gestor && html`<button class="btn primary" onClick=${() => ruta.estado === 'planeada' ? setEditarPedidos(true) : setNueva(true)}><${Icon} n="plus" size=${16} />${ruta.estado === 'planeada' ? 'Elegir pedidos' : 'Armar una nueva ruta'}</button>`}
     </section>`}
 
     <${Card} title="Mapa" icon="pin" pad=${false} action=${html`<button class="btn sm ghost" onClick=${() => setVerMapa(!verMapa)}>${verMapa ? 'Ocultar' : 'Mostrar'}</button>`}>
@@ -543,7 +548,7 @@ export function MiRuta({ perfil, rutaId }) {
 }
 
 /** Antes de salir: confirmar la carga, elegir inicio y final, ordenar la ruta e iniciar. */
-function PrepararRuta({ ruta, pendientes, gestor, onCambio }) {
+function PrepararRuta({ ruta, pendientes, gestor, onCambio, onPedidos }) {
   const items = new Map();
   for (const p of pendientes) for (const it of p.items || []) items.set(it.producto, (items.get(it.producto) || 0) + (Number(it.cantidad) || 0));
   const productos = [...items.entries()].sort();
@@ -576,7 +581,8 @@ function PrepararRuta({ ruta, pendientes, gestor, onCambio }) {
 
   return html`<section class="preparar">
     <div class=${'paso' + (cargada ? ' hecho' : ' activo')}>
-      <div class="paso-head"><span class="paso-num">${cargada ? html`<${Icon} n="check" size=${16} />` : '1'}</span><div><b>Confirma tu carga</b><span>Revisa que llevas todos los productos.</span></div></div>
+      <div class="paso-head"><span class="paso-num">${cargada ? html`<${Icon} n="check" size=${16} />` : '1'}</span><div><b>Confirma tu carga</b><span>${pendientes.length} pedidos · revisa que llevas todos los productos.</span></div>
+        ${onPedidos && !cargada && html`<button class="btn sm ghost paso-act" onClick=${onPedidos}><${Icon} n="edit" size=${14} />Pedidos</button>`}</div>
       ${cargada ? html`<div class="paso-ok"><span>Carga confirmada · ${num(sum(pendientes, 'canastas'))} canastas</span><button class="link" onClick=${() => confirmar(false).catch((e) => toast(e.message, 'error'))}>Deshacer</button></div>` : html`
         <div class="checklist">${productos.map(([k, v]) => html`<label key=${k} class=${'check-item' + (marcados.includes(k) ? ' on' : '')}>
           <input type="checkbox" checked=${marcados.includes(k)} onChange=${() => marcar(k)} /><span class="ci-box"><${Icon} n="check" size=${14} /></span>
@@ -597,6 +603,55 @@ function PrepararRuta({ ruta, pendientes, gestor, onCambio }) {
       <${AsyncButton} className="btn violet big block" icon="play" disabled=${!puedeIniciar} onClick=${iniciar}>${puedeIniciar ? 'Iniciar recorrido' : 'Primero confirma tu carga'}<//>
     </div>
   </section>`;
+}
+
+/** El repartidor elige los pedidos disponibles para crear o ajustar su propia ruta. */
+function TomarPedidos({ perfil, ruta, actuales = [], onListo, onCancelar }) {
+  const r = useAsync(() => q(sb.rpc('panel_pedidos_disponibles')), []);
+  const fechas = r.data ? [...new Set(r.data.map((p) => p.fecha_entrega).concat(ruta ? [ruta.fecha] : []))].sort() : [];
+  const [dia, setDia] = useState(ruta ? ruta.fecha : '');
+  useEffect(() => { if (!dia && fechas.length) setDia(fechas.includes(hoyISO()) ? hoyISO() : fechas[0]); }, [r.data]);
+  const [sel, setSel] = useState(() => actuales.map((p) => p.id));
+  const lista = actuales.concat((r.data || []).filter((p) => p.fecha_entrega === dia && !actuales.some((a) => a.id === p.id)));
+  const elegidos = lista.filter((p) => sel.includes(p.id));
+  const canastas = sum(elegidos, 'canastas'), cap = Number(perfil.capacidad_canastas) || 0;
+  const toggle = (id) => setSel(sel.includes(id) ? sel.filter((x) => x !== id) : [...sel, id]);
+  const disponibles = lista.filter((p) => !actuales.some((a) => a.id === p.id));
+  const guardar = async () => {
+    if (!elegidos.length && !ruta) throw new Error('Elige al menos un pedido.');
+    const o = (ruta && puntoDe(ruta, 'origen')) || leerOrigen();
+    const orden = actuales.filter((p) => sel.includes(p.id)).concat(disponibles.filter((p) => sel.includes(p.id)));
+    await q(sb.rpc('panel_guardar_ruta', { p_fecha: ruta ? ruta.fecha : dia, p_repartidor: perfil.email, p_origen_texto: o.texto || null, p_origen_lat: o.lat || null, p_origen_lng: o.lng || null,
+      p_volver: ruta ? ruta.volver_origen !== false : true, p_paradas: orden.map((p) => ({ id: p.id, lat: p.lat || null, lng: p.lng || null, minutos: null })),
+      p_destino_texto: ruta ? ruta.destino_texto : null, p_destino_lat: ruta ? ruta.destino_lat : null, p_destino_lng: ruta ? ruta.destino_lng : null }));
+    toast(ruta ? 'Pedidos de tu ruta actualizados' : '¡Ruta creada! Ahora confirma tu carga y ordénala.');
+    onListo();
+  };
+
+  return html`<div class="stack ruta-view con-barra">
+    <section class="ruta-head"><div><span class="hero-kicker">${ruta ? fechaLarga(ruta.fecha) : 'Nueva ruta'}</span>
+      <h2>${ruta ? 'Pedidos de tu ruta' : 'Arma tu ruta'}</h2><span>Elige los pedidos que vas a entregar.</span></div></section>
+    <${ErrorBox} error=${r.error} onRetry=${r.reload} />
+    ${!r.data ? html`<${Loader} rows=${5} />` : !lista.length && !fechas.length ? html`<${Card}><${Empty} icon="check" title="No hay pedidos por entregar">Cuando lleguen pedidos sin repartidor aparecerán aquí.<//>
+        <div class="center"><button class="btn" onClick=${r.reload}><${Icon} n="refresh" size=${16} />Revisar de nuevo</button></div><//>` : html`
+      ${!ruta && html`<${Field} label="Día de entrega"><select class="input" value=${dia} onChange=${(e) => { setDia(e.target.value); setSel([]); }}>
+        ${fechas.map((f) => html`<option value=${f}>${fechaLarga(f)}${f === hoyISO() ? ' (hoy)' : ''}</option>`)}</select><//>`}
+      <${Card} title=${lista.length + ' pedido(s)'} icon="pedidos" pad=${false}
+        action=${lista.length > 0 && html`<button class="btn sm ghost" onClick=${() => setSel(sel.length === lista.length ? [] : lista.map((p) => p.id))}>${sel.length === lista.length ? 'Quitar todos' : 'Elegir todos'}</button>`}>
+        ${!lista.length ? html`<${Empty} icon="check" title="No hay pedidos libres ese día" />` :
+        html`<div class="checklist pad">${lista.map((p) => html`<label key=${p.id} class=${'check-item' + (sel.includes(p.id) ? ' on' : '')}>
+          <input type="checkbox" checked=${sel.includes(p.id)} onChange=${() => toggle(p.id)} /><span class="ci-box"><${Icon} n="check" size=${14} /></span>
+          <span class="ci-txt"><b class="dir-main">${p.direccion_entrega || 'Sin dirección'}</b><span class="dir-sub">${[p.barrio, p.municipio].filter(Boolean).join(' · ')}</span>
+            <span class="ri-meta">${p.cliente} · #${p.id}${(p.items || []).length ? ' · ' + p.items.map((it) => it.cantidad + ' ' + it.producto).join(', ') : ''}</span></span>
+          <b>${num(p.canastas)}<small class="muted"> can.</small></b></label>`)}</div>`}
+      <//>`}
+    <div class="entrega-bar">
+      ${onCancelar ? html`<button class="btn ghost" onClick=${onCancelar}>Cancelar</button>` : html`<div class="ab-info dark"><b>${elegidos.length} pedidos</b><span>${num(canastas)}${cap ? ' de ' + cap : ''} canastas</span></div>`}
+      <${AsyncButton} className="btn primary" icon="check" disabled=${!r.data || (!ruta && !elegidos.length)} onClick=${guardar}>
+        ${ruta ? 'Guardar (' + elegidos.length + ')' : 'Crear mi ruta (' + elegidos.length + ')'}<//>
+    </div>
+    ${cap > 0 && canastas > cap && html`<div class="warn"><${Icon} n="alert" size=${16} />Llevas ${num(canastas)} canastas y tu capacidad es ${cap}.</div>`}
+  </div>`;
 }
 
 function EntregarModal({ p, ruta, onClose, onSend }) {

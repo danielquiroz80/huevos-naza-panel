@@ -705,3 +705,7 @@ hr.sep { border: 0; border-top: 1px solid var(--line); margin: 4px 0; width: 100
   .rep-chips { grid-template-columns: 1fr; }
   .auto-pie .btn { width: 100%; }
 }
+.checklist.pad { padding: 12px; }
+.check-item .ci-txt .dir-main { font-weight: 800; }
+.paso-head .paso-act { margin-left: auto; }
+.ab-info.dark span { color: var(--ink-3); }
