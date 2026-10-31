@@ -26,10 +26,10 @@ function useMapa(caja) {
 }
 
 /** Una ruta: punto de salida y paradas numeradas en orden. */
-export function Mapa({ origen, paradas = [], height = 320, actual, ubicacion }) {
+export function Mapa({ origen, destino, paradas = [], height = 320, actual, ubicacion }) {
   const caja = useRef(null);
   const [mapa, capa] = useMapa(caja);
-  const firma = JSON.stringify([origen && origen.lat, origen && origen.lng, actual, ubicacion, paradas.map((p) => [p.id, p.lat, p.lng, p.estado])]);
+  const firma = JSON.stringify([origen && origen.lat, origen && origen.lng, destino && destino.lat, destino && destino.lng, actual, ubicacion, paradas.map((p) => [p.id, p.lat, p.lng, p.estado])]);
   useEffect(() => {
     const m = mapa.current, g = capa.current;
     if (!m) return;
@@ -44,6 +44,9 @@ export function Mapa({ origen, paradas = [], height = 320, actual, ubicacion }) 
       L.marker([p.lat, p.lng], { icon: pin(i + 1, clase) }).addTo(g).bindTooltip(`${i + 1}. ${p.cliente || ''}`);
       pts.push([p.lat, p.lng]); linea.push([p.lat, p.lng]);
     });
+    const fin = destino && destino.lat ? destino : null;
+    if (fin && !(origen && origen.lat === fin.lat && origen.lng === fin.lng)) { L.marker([fin.lat, fin.lng], { icon: pin('⚑', 'origen') }).addTo(g).bindTooltip('Punto final'); pts.push([fin.lat, fin.lng]); }
+    if (fin && linea.length) linea.push([fin.lat, fin.lng]);
     if (linea.length > 1) L.polyline(linea, { color: '#F7B016', weight: 4, opacity: 0.85, dashArray: '6 8' }).addTo(g);
     if (ubicacion && ubicacion.lat) { L.marker([ubicacion.lat, ubicacion.lng], { icon: camion('#241F35') }).addTo(g).bindTooltip('Tu ubicación'); pts.push([ubicacion.lat, ubicacion.lng]); }
     if (pts.length) m.fitBounds(pts, { padding: [36, 36], maxZoom: 15 });

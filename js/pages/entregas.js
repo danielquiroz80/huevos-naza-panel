@@ -26,6 +26,118 @@ function HojaCarga({ paradas }) {
   return html`<div class="carga">${[...items.entries()].sort().map(([k, v]) => html`<div key=${k} class="carga-item"><span class="egg-dot"></span><span>${k}</span><b>${num(v)}</b></div>`)}</div>`;
 }
 
+/** Punto de salida y punto final (por defecto el mismo de salida). */
+function PuntosRuta({ origen, setOrigen, destino, setDestino, mismo, setMismo, disabled }) {
+  const ubicar = (set, texto) => async () => {
+    const u = await ubicacionActual();
+    if (!u) throw new Error('No pudimos obtener tu ubicación. Revisa el permiso de ubicación del navegador.');
+    set({ texto, lat: u.lat, lng: u.lng });
+  };
+  return html`<div class="puntos">
+    <div class="punto"><span class="punto-ico ini"><${Icon} n="home" size=${16} /></span>
+      <div class="punto-body"><label>Punto de salida</label>
+        <div class="origen"><input class="input" placeholder="Ej.: Carrera 43A # 6 Sur-15, Medellín" value=${origen.texto} disabled=${disabled}
+          onInput=${(e) => setOrigen({ texto: e.target.value, lat: null, lng: null })} />
+          <${AsyncButton} className="btn" icon="nav" disabled=${disabled} onClick=${ubicar(setOrigen, 'Mi ubicación actual')}>Mi ubicación<//></div></div></div>
+    <div class="punto"><span class="punto-ico fin"><${Icon} n="pin" size=${16} /></span>
+      <div class="punto-body"><label>Punto final</label>
+        <label class="switch small-sw"><input type="checkbox" checked=${mismo} disabled=${disabled} onChange=${(e) => setMismo(e.target.checked)} /><span></span>El mismo punto de salida</label>
+        ${!mismo && html`<div class="origen"><input class="input" placeholder="¿Dónde termina el recorrido?" value=${destino.texto} disabled=${disabled}
+          onInput=${(e) => setDestino({ texto: e.target.value, lat: null, lng: null })} />
+          <${AsyncButton} className="btn" icon="nav" disabled=${disabled} onClick=${ubicar(setDestino, 'Mi ubicación actual')}>Mi ubicación<//></div>`}</div></div>
+  </div>`;
+}
+
+/** Botón principal para calcular la ruta más rápida. */
+function BotonOrdenar({ onClick, disabled, google, texto }) {
+  return html`<${AsyncButton} className="btn-ordenar" disabled=${disabled} onClick=${onClick}>
+    <span class="bo-ico"><${Icon} n="spark" size=${22} /></span>
+    <span class="bo-txt"><b>${texto || 'Ordenar ruta más rápida'}</b><small>${google ? 'Calcula el mejor orden con el tráfico actual' : 'Orden aproximado por distancia (falta la clave de Google Maps)'}</small></span>
+  <//>`;
+}
+
+const puntoDe = (ruta, campo) => ruta && ruta[campo + '_lat'] ? { texto: ruta[campo + '_texto'] || '', lat: ruta[campo + '_lat'], lng: ruta[campo + '_lng'] } : (ruta && ruta[campo + '_texto'] ? { texto: ruta[campo + '_texto'], lat: null, lng: null } : null);
+const VACIO = { texto: '', lat: null, lng: null };
+
+/** Reparte los pedidos entre los repartidores disponibles por zonas (barrido angular) y según su capacidad. */
+function repartir(pedidos, reps, centro) {
+  const con = pedidos.filter((p) => p.lat && p.lng), sin = pedidos.filter((p) => !(p.lat && p.lng));
+  const c = centro && centro.lat ? centro : con.length ? { lat: sum(con, 'lat') / con.length, lng: sum(con, 'lng') / con.length } : null;
+  const grupos = reps.map(() => []);
+  if (con.length && c) {
+    const ang = (p) => Math.atan2(p.lat - c.lat, p.lng - c.lng);
+    const ord = con.map((p) => ({ p, a: ang(p) })).sort((x, y) => x.a - y.a);
+    let gap = -1, ini = 0;
+    ord.forEach((x, i) => { const sig = i + 1 < ord.length ? ord[i + 1].a : ord[0].a + 2 * Math.PI; if (sig - x.a > gap) { gap = sig - x.a; ini = (i + 1) % ord.length; } });
+    const giro = ord.slice(ini).concat(ord.slice(0, ini)).map((x) => x.p);
+    const caps = reps.map((r) => Number(r.capacidad_canastas) || 0);
+    const prom = caps.filter(Boolean).length ? sum(caps.filter(Boolean), (x) => x) / caps.filter(Boolean).length : 1;
+    const pesos = caps.map((x) => x || prom), totalPeso = sum(pesos, (x) => x);
+    const total = sum(giro, (p) => Number(p.canastas) || 1);
+    let acum = 0;
+    const cortes = []; pesos.reduce((a, w) => { cortes.push(a + w / totalPeso); return a + w / totalPeso; }, 0);
+    giro.forEach((p) => {
+      const w = Number(p.canastas) || 1; const medio = (acum + w / 2) / total; acum += w;
+      let k = cortes.findIndex((x) => medio <= x + 1e-9); if (k < 0) k = reps.length - 1;
+      grupos[k].push(p);
+    });
+  } else sin.unshift(...con);
+  sin.forEach((p) => { let k = 0; grupos.forEach((g, i) => { if (sum(g, 'canastas') < sum(grupos[k], 'canastas')) k = i; }); grupos[k].push(p); });
+  return grupos;
+}
+
+/** Creación automática de rutas según los repartidores disponibles. */
+function AutoRutas({ dia, data, origen, destino, mismo, onListo }) {
+  const [sel, setSel] = useState(() => data.reps.map((r) => r.email));
+  const [res, setRes] = useState(null);
+  const bloqueadas = new Set(data.rutas.filter((r) => r.estado !== 'planeada').map((r) => r.id));
+  const libres = data.pedidos.filter((p) => ['pendiente', 'confirmado', 'preparando'].includes(p.estado) && !(p.ruta_id && bloqueadas.has(p.ruta_id)));
+  const ocupados = new Set(data.rutas.filter((r) => r.estado !== 'planeada').map((r) => r.repartidor));
+  const disponibles = data.reps.filter((r) => sel.includes(r.email) && !ocupados.has(r.email));
+  const toggle = (e) => setSel(sel.includes(e) ? sel.filter((x) => x !== e) : [...sel, e]);
+  const crear = async () => {
+    if (!disponibles.length) throw new Error('Selecciona al menos un repartidor disponible.');
+    if (!libres.length) throw new Error('No hay pedidos por asignar para este día.');
+    if (!origen.texto && !origen.lat) throw new Error('Escribe el punto de salida o usa tu ubicación.');
+    const grupos = repartir(libres, disponibles, origen);
+    const salida = [];
+    for (let i = 0; i < disponibles.length; i++) {
+      const r = disponibles[i], g = grupos[i];
+      let paradas = g.map((p) => ({ id: p.id, lat: p.lat, lng: p.lng, minutos: null })), info = null;
+      if (g.length > 1) {
+        try {
+          const x = await accion({ accion: 'ruta_optimizar', fecha: dia, ids: g.map((p) => p.id), origen, volver: mismo, destino: mismo ? null : destino });
+          info = x.data; paradas = info.paradas.map((p) => ({ id: p.id, lat: p.lat, lng: p.lng, minutos: p.minutos }));
+        } catch (e) { /* se guarda sin ordenar */ }
+      }
+      const o = info && info.origen && info.origen.lat ? info.origen : origen;
+      const dd = mismo ? o : (info && info.destino) || destino;
+      await q(sb.rpc('panel_guardar_ruta', { p_fecha: dia, p_repartidor: r.email, p_origen_texto: origen.texto || null, p_origen_lat: o.lat || null, p_origen_lng: o.lng || null,
+        p_volver: mismo, p_paradas: paradas, p_distancia_km: info ? info.distancia_km : null, p_duracion_min: info ? info.duracion_min : null,
+        p_destino_texto: mismo ? null : destino.texto || null, p_destino_lat: mismo ? null : dd.lat || null, p_destino_lng: mismo ? null : dd.lng || null }));
+      salida.push({ nombre: r.nombre || r.usuario, paradas: g.length, canastas: sum(g, 'canastas'), cap: r.capacidad_canastas, min: info && info.duracion_min, km: info && info.distancia_km });
+    }
+    localStorage.setItem(ORIGEN_KEY, JSON.stringify(origen));
+    setRes(salida); toast(salida.length + ' ruta(s) creadas y asignadas'); onListo();
+  };
+  return html`<${Card} title="Crear rutas automáticamente" icon="spark">
+    <p class="muted small">Marca quiénes salen a repartir. La app divide los ${libres.length} pedidos por zonas y según la capacidad de cada uno, y ordena cada ruta.</p>
+    <div class="rep-chips">${data.reps.map((r) => {
+      const ocu = ocupados.has(r.email), on = sel.includes(r.email) && !ocu;
+      return html`<button key=${r.email} class=${'rep-chip' + (on ? ' on' : '')} disabled=${ocu} onClick=${() => toggle(r.email)}>
+        <span class="rc-check"><${Icon} n=${on ? 'check' : 'plus'} size=${14} /></span>
+        <span><b>${r.nombre || r.usuario}</b><small>${ocu ? 'Ya está en recorrido' : r.capacidad_canastas ? 'Hasta ' + r.capacidad_canastas + ' canastas' : 'Sin capacidad definida'}</small></span></button>`;
+    })}</div>
+    ${!data.reps.length && html`<p class="warn">No hay repartidores activos. Créalos en Administración → Equipo.</p>`}
+    <div class="auto-pie">
+      <span><b>${disponibles.length}</b> repartidor(es) disponibles · <b>${num(sum(libres, 'canastas'))}</b> canastas</span>
+      <${AsyncButton} className="btn violet" icon="spark" disabled=${!disponibles.length || !libres.length} onClick=${crear}>Crear ${disponibles.length || ''} ruta(s)<//>
+    </div>
+    ${res && html`<div class="auto-res">${res.map((x) => html`<div key=${x.nombre}><b>${x.nombre}</b><span>${x.paradas} paradas · ${num(x.canastas)} can.${x.min ? ' · ' + x.min + ' min' : ''}${x.km ? ' · ' + num(x.km) + ' km' : ''}</span>
+      ${x.cap && x.canastas > x.cap ? html`<span class="neg small">Supera su capacidad (${x.cap})</span>` : null}</div>`)}</div>`}
+  <//>`;
+}
+
 /* =================== Entregas (Admin y Operador) =================== */
 export function Entregas({ perfil }) {
   const [tab, setTab] = useState('vivo');
@@ -132,6 +244,7 @@ function Planear({ onVer }) {
   const [rep, setRep] = useState(null);
   const [origen, setOrigen] = useState(leerOrigen());
   const [volver, setVolver] = useState(true);
+  const [destino, setDestino] = useState(VACIO);
   const [lista, setLista] = useState(null);
   const [info, setInfo] = useState(null);
 
@@ -154,7 +267,7 @@ function Planear({ onVer }) {
     const enRuta = ruta ? d.data.pedidos.filter((p) => p.ruta_id === ruta.id).sort((a, b) => (a.orden_manual ?? 99) - (b.orden_manual ?? 99)) : [];
     setLista(enRuta.map((p) => ({ id: p.id, lat: p.lat, lng: p.lng, minutos: p.minutos_tramo })));
     if (ruta && ruta.origen_texto) setOrigen({ texto: ruta.origen_texto, lat: ruta.origen_lat, lng: ruta.origen_lng });
-    if (ruta) setVolver(ruta.volver_origen !== false);
+    if (ruta) { setVolver(ruta.volver_origen !== false); setDestino(puntoDe(ruta, 'destino') || VACIO); }
   }, [d.data, rep]);
 
   if (fechas.loading && !fechas.data) return html`<${Loader} rows=${5} />`;
@@ -175,18 +288,15 @@ function Planear({ onVer }) {
   const mover = (i, dlt) => { const l = [...lista]; const [x] = l.splice(i, 1); l.splice(i + dlt, 0, x); setLista(l); };
   const quitar = (id) => setLista(lista.filter((x) => x.id !== id));
   const agregar = (ps) => setLista([...(lista || []), ...ps.map((p) => ({ id: p.id, lat: p.lat, lng: p.lng, minutos: null }))]);
-  const usarUbicacion = async () => {
-    const u = await ubicacionActual();
-    if (!u) throw new Error('No pudimos obtener tu ubicación. Revisa el permiso de ubicación del navegador.');
-    setOrigen({ texto: 'Mi ubicación actual', lat: u.lat, lng: u.lng });
-  };
   const optimizar = async () => {
     if (!filas.length) throw new Error('Primero agrega pedidos a la ruta.');
     if (!origen.texto && !origen.lat) throw new Error('Escribe el punto de salida o usa tu ubicación.');
-    const x = (await accion({ accion: 'ruta_optimizar', fecha: dia, ids: filas.map((p) => p.id), origen, volver }));
+    if (!volver && !destino.texto && !destino.lat) throw new Error('Escribe el punto final o marca "El mismo punto de salida".');
+    const x = (await accion({ accion: 'ruta_optimizar', fecha: dia, ids: filas.map((p) => p.id), origen, volver, destino: volver ? null : destino }));
     const data = x.data;
     setLista(data.paradas.map((p) => ({ id: p.id, lat: p.lat, lng: p.lng, minutos: p.minutos })));
     if (data.origen && data.origen.lat) setOrigen({ ...origen, lat: data.origen.lat, lng: data.origen.lng });
+    if (!volver && data.destino && data.destino.lat) setDestino({ ...destino, lat: data.destino.lat, lng: data.destino.lng });
     setInfo(data);
     toast(x.mensaje);
   };
@@ -194,7 +304,8 @@ function Planear({ onVer }) {
     const id = await q(sb.rpc('panel_guardar_ruta', {
       p_fecha: dia, p_repartidor: rep || null, p_origen_texto: origen.texto || null, p_origen_lat: origen.lat || null, p_origen_lng: origen.lng || null,
       p_volver: volver, p_paradas: filas.map((p) => ({ id: p.id, lat: p.lat || null, lng: p.lng || null, minutos: p.minutos ?? null })),
-      p_distancia_km: info ? info.distancia_km : null, p_duracion_min: info ? info.duracion_min : null
+      p_distancia_km: info ? info.distancia_km : null, p_duracion_min: info ? info.duracion_min : null,
+      p_destino_texto: volver ? null : destino.texto || null, p_destino_lat: volver ? null : destino.lat || null, p_destino_lng: volver ? null : destino.lng || null
     }));
     localStorage.setItem(ORIGEN_KEY, JSON.stringify(origen));
     setInfo(null);
@@ -219,20 +330,17 @@ function Planear({ onVer }) {
     </div>
     <${ErrorBox} error=${d.error} onRetry=${d.reload} />
     ${!d.data || lista === null ? html`<${Loader} rows=${5} />` : html`
+    <${AutoRutas} key=${dia} dia=${dia} data=${d.data} origen=${origen} destino=${destino} mismo=${volver} onListo=${() => { setRep(null); d.reload(); }} />
+    <div class="section-title">Revisar o ajustar una ruta</div>
     <div class="grid-2 planner">
       <div class="stack">
-        <${Card} title="Punto de salida" icon="home" action=${ruta && html`<${Badge} tone=${(ESTADO_RUTA[ruta.estado] || [])[1]}>${(ESTADO_RUTA[ruta.estado] || [])[0]}<//>`}>
-          <div class="origen">
-            <input class="input" placeholder="Ej.: Carrera 43A # 6 Sur-15, Medellín" value=${origen.texto}
-              onInput=${(e) => setOrigen({ texto: e.target.value, lat: null, lng: null })} disabled=${!editable} />
-            <${AsyncButton} className="btn" icon="nav" onClick=${usarUbicacion} disabled=${!editable}>Usar mi ubicación<//>
-          </div>
-          <label class="switch small-sw"><input type="checkbox" checked=${volver} onChange=${(e) => setVolver(e.target.checked)} disabled=${!editable} /><span></span>Regresar al punto de salida al terminar</label>
-          ${!d.data.google && html`<p class="muted small note-line"><${Icon} n="alert" size=${13} />Sin clave de Google Maps el orden es aproximado (usa las ubicaciones guardadas).</p>`}
+        <${Card} title="Puntos del recorrido" icon="home" action=${ruta && html`<${Badge} tone=${(ESTADO_RUTA[ruta.estado] || [])[1]}>${(ESTADO_RUTA[ruta.estado] || [])[0]}<//>`}>
+          <${PuntosRuta} origen=${origen} setOrigen=${setOrigen} destino=${destino} setDestino=${setDestino} mismo=${volver} setMismo=${setVolver} disabled=${!editable} />
         <//>
 
         <${Card} title=${'Ruta · ' + filas.length + ' paradas · ' + num(canastas) + ' canastas'} icon="truck" pad=${false}
-          action=${editable && filas.length > 1 && html`<${AsyncButton} className="btn sm" icon="spark" onClick=${optimizar}>Ordenar ruta<//>`}>
+>
+          ${editable && filas.length > 1 && html`<div class="card-body bo-wrap"><${BotonOrdenar} google=${d.data.google} onClick=${optimizar} /></div>`}
           ${info && html`<div class="info m"><${Icon} n="spark" size=${16} /><span>${info.metodo === 'google' ? 'Ordenada con Google Maps' : 'Orden aproximado'}${info.distancia_km ? ' · ' + num(info.distancia_km) + ' km' : ''}${info.duracion_min ? ' · ' + num(info.duracion_min) + ' min de manejo' : ''}. Revisa y guarda.${(info.avisos || []).length ? ' ' + info.avisos.join(' ') : ''}</span></div>`}
           ${repSel && repSel.capacidad_canastas && canastas > repSel.capacidad_canastas && html`<div class="warn m"><${Icon} n="alert" size=${16} />Son ${num(canastas)} canastas y la capacidad de ${repSel.nombre || repSel.usuario} es ${repSel.capacidad_canastas}.</div>`}
           ${!filas.length ? html`<${Empty} icon="truck" title="La ruta está vacía">Toca los pedidos de la lista "Por asignar" para agregarlos.<//>` :
@@ -262,7 +370,7 @@ function Planear({ onVer }) {
       </div>
 
       <div class="stack sticky-col">
-        <${Card} title="Mapa" icon="pin" pad=${false}><${Mapa} origen=${origen} paradas=${filas} height=${340} /><//>
+        <${Card} title="Mapa" icon="pin" pad=${false}><${Mapa} origen=${origen} destino=${volver ? null : destino} paradas=${filas} height=${340} /><//>
         <${Card} title="Hoja de carga" icon="box"><${HojaCarga} paradas=${filas} /><//>
       </div>
     </div>
@@ -353,8 +461,7 @@ export function MiRuta({ perfil, rutaId }) {
   const pct = paradas.length ? Math.round((hechos.length / paradas.length) * 100) : 0;
   const origen = { lat: ruta.origen_lat, lng: ruta.origen_lng };
   const puedeMarcar = ruta.estado === 'en_curso' || gestor;
-
-  const iniciar = async () => { const x = await accion({ accion: 'ruta_iniciar', ruta_id: ruta.id }); toast(x.mensaje); r.reload(); };
+  const destino = ruta.volver_origen === false ? puntoDe(ruta, 'destino') : null;
   const registrar = async (payload) => {
     const x = await accion({ accion: 'entrega', ...payload });
     toast(x.mensaje); setDlg(null); r.reload();
@@ -369,10 +476,7 @@ export function MiRuta({ perfil, rutaId }) {
       <div class="ruta-ring" style=${{ '--p': pct }}><b>${pct}%</b></div>
     </section>
 
-    ${ruta.estado === 'planeada' && pendientes.length > 0 && html`<section class="start-box">
-      <div class="sb-txt"><b>¿Todo cargado? ¡A rodar!</b><span>Al iniciar, cada cliente recibe un mensaje con su turno y la hora aproximada de llegada.</span></div>
-      <${HojaCarga} paradas=${pendientes} />
-      <${AsyncButton} className="btn violet big block" icon="play" onClick=${iniciar}>Iniciar recorrido<//></section>`}
+    ${ruta.estado === 'planeada' && pendientes.length > 0 && html`<${PrepararRuta} ruta=${ruta} pendientes=${pendientes} gestor=${gestor} onCambio=${r.reload} />`}
 
     ${actual ? html`<section class="parada-actual">
       <div class="pa-top"><span class="pa-num">${paradas.indexOf(actual) + 1}</span>
@@ -392,7 +496,7 @@ export function MiRuta({ perfil, rutaId }) {
         ${actual.telefono && html`<a class="btn" href=${whatsappLink(actual.telefono, 'Hola, soy el repartidor de Huevos de la Naza. Ya voy llegando con tu pedido.')} target="_blank" rel="noopener"><${Icon} n="chat" size=${16} />WhatsApp</a>`}
         <button class="btn ghost" onClick=${() => setDlg({ t: 'nota', p: actual, texto: actual.indicaciones || '' })}><${Icon} n="edit" size=${16} />Indicaciones</button>
       </div>
-      ${!puedeMarcar && html`<p class="muted small center">Inicia el recorrido para poder marcar las entregas.</p>`}
+      ${!puedeMarcar && html`<p class="muted small center">Confirma tu carga e inicia el recorrido para poder marcar las entregas.</p>`}
     </section>` : html`<section class="fin-ruta">
       <div class="empty-ico big"><${Icon} n="check" size=${34} /></div>
       <h3>¡Recorrido completo!</h3>
@@ -401,7 +505,7 @@ export function MiRuta({ perfil, rutaId }) {
     </section>`}
 
     <${Card} title="Mapa" icon="pin" pad=${false} action=${html`<button class="btn sm ghost" onClick=${() => setVerMapa(!verMapa)}>${verMapa ? 'Ocultar' : 'Mostrar'}</button>`}>
-      ${verMapa && html`<${Mapa} origen=${origen} paradas=${paradas} actual=${actual && actual.id} ubicacion=${yo} height=${300} />`}
+      ${verMapa && html`<${Mapa} origen=${origen} destino=${destino} paradas=${paradas} actual=${actual && actual.id} ubicacion=${yo} height=${300} />`}
     <//>
 
     <${Card} title=${'Paradas · ' + paradas.length} icon="pedidos" pad=${false}>
@@ -436,6 +540,63 @@ export function MiRuta({ perfil, rutaId }) {
       <${Field} label="Para la próxima entrega" hint="Ej.: portería de la torre 2, timbre 301."><textarea class="input" rows="3" value=${dlg.texto} onInput=${(e) => setDlg({ ...dlg, texto: e.target.value })}></textarea><//>
     <//>`}
   </div>`;
+}
+
+/** Antes de salir: confirmar la carga, elegir inicio y final, ordenar la ruta e iniciar. */
+function PrepararRuta({ ruta, pendientes, gestor, onCambio }) {
+  const items = new Map();
+  for (const p of pendientes) for (const it of p.items || []) items.set(it.producto, (items.get(it.producto) || 0) + (Number(it.cantidad) || 0));
+  const productos = [...items.entries()].sort();
+  const [marcados, setMarcados] = useState(() => ruta.carga_confirmada_en ? productos.map(([k]) => k) : []);
+  const [origen, setOrigen] = useState(puntoDe(ruta, 'origen') || leerOrigen());
+  const [mismo, setMismo] = useState(ruta.volver_origen !== false);
+  const [destino, setDestino] = useState(puntoDe(ruta, 'destino') || VACIO);
+  const [google, setGoogle] = useState(true);
+  const [info, setInfo] = useState(null);
+  useEffect(() => { sb.rpc('panel_secretos_configurados').then(({ data }) => setGoogle((data || []).includes('google_maps_key')), () => {}); }, []);
+  const cargada = !!ruta.carga_confirmada_en;
+  const todo = productos.every(([k]) => marcados.includes(k));
+  const marcar = (k) => setMarcados(marcados.includes(k) ? marcados.filter((x) => x !== k) : [...marcados, k]);
+
+  const confirmar = async (si) => { await q(sb.rpc('panel_confirmar_carga', { p_ruta: ruta.id, p_confirmada: si })); if (!si) setMarcados([]); toast(si ? 'Carga confirmada' : 'Carga sin confirmar'); onCambio(); };
+  const ordenar = async () => {
+    if (!origen.texto && !origen.lat) throw new Error('Escribe el punto de salida o usa tu ubicación.');
+    if (!mismo && !destino.texto && !destino.lat) throw new Error('Escribe el punto final o marca "El mismo punto de salida".');
+    const x = await accion({ accion: 'ruta_optimizar', fecha: ruta.fecha, ids: pendientes.map((p) => p.id), origen, volver: mismo, destino: mismo ? null : destino });
+    const d = x.data, o = d.origen && d.origen.lat ? { ...origen, lat: d.origen.lat, lng: d.origen.lng } : origen;
+    const f = !mismo && d.destino && d.destino.lat ? { ...destino, lat: d.destino.lat, lng: d.destino.lng } : destino;
+    await q(sb.rpc('panel_guardar_ruta', { p_fecha: ruta.fecha, p_repartidor: ruta.repartidor, p_origen_texto: o.texto || null, p_origen_lat: o.lat || null, p_origen_lng: o.lng || null,
+      p_volver: mismo, p_paradas: d.paradas.map((p) => ({ id: p.id, lat: p.lat, lng: p.lng, minutos: p.minutos })), p_distancia_km: d.distancia_km, p_duracion_min: d.duracion_min,
+      p_destino_texto: mismo ? null : f.texto || null, p_destino_lat: mismo ? null : f.lat || null, p_destino_lng: mismo ? null : f.lng || null }));
+    localStorage.setItem(ORIGEN_KEY, JSON.stringify(o));
+    setInfo(d); toast(x.mensaje); onCambio();
+  };
+  const iniciar = async () => { const x = await accion({ accion: 'ruta_iniciar', ruta_id: ruta.id }); toast(x.mensaje); onCambio(); };
+  const puedeIniciar = cargada || gestor;
+
+  return html`<section class="preparar">
+    <div class=${'paso' + (cargada ? ' hecho' : ' activo')}>
+      <div class="paso-head"><span class="paso-num">${cargada ? html`<${Icon} n="check" size=${16} />` : '1'}</span><div><b>Confirma tu carga</b><span>Revisa que llevas todos los productos.</span></div></div>
+      ${cargada ? html`<div class="paso-ok"><span>Carga confirmada · ${num(sum(pendientes, 'canastas'))} canastas</span><button class="link" onClick=${() => confirmar(false).catch((e) => toast(e.message, 'error'))}>Deshacer</button></div>` : html`
+        <div class="checklist">${productos.map(([k, v]) => html`<label key=${k} class=${'check-item' + (marcados.includes(k) ? ' on' : '')}>
+          <input type="checkbox" checked=${marcados.includes(k)} onChange=${() => marcar(k)} /><span class="ci-box"><${Icon} n="check" size=${14} /></span>
+          <span class="ci-txt">${k}</span><b>${num(v)}</b></label>`)}</div>
+        <${AsyncButton} className="btn green block" icon="check" disabled=${!todo} onClick=${() => confirmar(true)}>${todo ? 'Confirmo que llevo todo' : 'Marca cada producto (' + marcados.length + '/' + productos.length + ')'}<//>`}
+    </div>
+
+    <div class="paso activo">
+      <div class="paso-head"><span class="paso-num">2</span><div><b>Arma tu ruta</b><span>Elige de dónde sales y dónde terminas.</span></div></div>
+      <${PuntosRuta} origen=${origen} setOrigen=${setOrigen} destino=${destino} setDestino=${setDestino} mismo=${mismo} setMismo=${setMismo} />
+      <${BotonOrdenar} google=${google} onClick=${ordenar} />
+      ${(info || ruta.duracion_min) && html`<div class="info"><${Icon} n="spark" size=${16} /><span>${info ? (info.metodo === 'google' ? 'Calculada con el tráfico actual' : 'Orden aproximado') : 'Ruta guardada'}
+        ${(info || ruta).distancia_km ? ' · ' + num((info || ruta).distancia_km) + ' km' : ''}${(info || ruta).duracion_min ? ' · unos ' + num((info || ruta).duracion_min) + ' min de manejo' : ''}${info && (info.avisos || []).length ? '. ' + info.avisos.join(' ') : ''}</span></div>`}
+    </div>
+
+    <div class=${'paso' + (puedeIniciar ? ' activo' : ' bloqueado')}>
+      <div class="paso-head"><span class="paso-num">3</span><div><b>¡A rodar!</b><span>Al iniciar, cada cliente recibe su turno y la hora aproximada de llegada.</span></div></div>
+      <${AsyncButton} className="btn violet big block" icon="play" disabled=${!puedeIniciar} onClick=${iniciar}>${puedeIniciar ? 'Iniciar recorrido' : 'Primero confirma tu carga'}<//>
+    </div>
+  </section>`;
 }
 
 function EntregarModal({ p, ruta, onClose, onSend }) {
