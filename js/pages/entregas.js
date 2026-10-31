@@ -1,6 +1,6 @@
-import { html, useState, useEffect, useRef, Icon, Card, Kpi, Tabs, Loader, Empty, ErrorBox, Modal, Field, AsyncButton, Badge, Meter, useAsync, toast } from '../ui.js';
+import { html, useState, useEffect, useRef, Icon, Card, Kpi, Tabs, Loader, Empty, ErrorBox, Modal, Field, AsyncButton, Badge, Meter, Drawer, SearchBox, useAsync, toast } from '../ui.js';
 import { sb, q, num, fechaLarga, fechaCorta, fechaHora, hoyISO, isoDate, sumarDias, sum, accion, rutaLink, navegarLink, whatsappLink,
-  ubicacionActual, comprimirFoto, MOTIVOS, nombreUsuario } from '../lib.js';
+  ubicacionActual, comprimirFoto, MOTIVOS, nombreUsuario, norm, ESTADOS } from '../lib.js';
 import { Mapa, MapaRutas, COLORES_RUTA } from '../mapa.js';
 import { EstadoBadge } from './pedidos.js';
 
@@ -8,7 +8,7 @@ const ABIERTA = ['pendiente', 'confirmado', 'preparando', 'en_camino'];
 const ORIGEN_KEY = 'naza_origen';
 const leerOrigen = () => { try { return JSON.parse(localStorage.getItem(ORIGEN_KEY) || 'null') || { texto: '', lat: null, lng: null }; } catch (e) { return { texto: '', lat: null, lng: null }; } };
 const hace = (t) => { if (!t) return ''; const m = Math.round((Date.now() - new Date(t)) / 60000); return m < 1 ? 'hace un momento' : m < 60 ? 'hace ' + m + ' min' : 'hace ' + Math.round(m / 60) + ' h'; };
-const ESTADO_RUTA = { planeada: ['Por iniciar', 'amber'], en_curso: ['En recorrido', 'violet'], terminada: ['Terminada', 'green'] };
+const ESTADO_RUTA = { planeada: ['Por iniciar', 'amber'], en_curso: ['En ruta', 'violet'], terminada: ['Finalizada', 'green'], cancelada: ['Cancelada', 'gray'] };
 const copiar = (t) => navigator.clipboard && navigator.clipboard.writeText(t).then(() => toast('Dirección copiada'));
 
 /** Dirección grande y clara, con barrio y municipio. */
@@ -89,7 +89,7 @@ function repartir(pedidos, reps, centro) {
 const totales = (ps) => { const m = new Map(); for (const p of ps) for (const it of p.items || []) m.set(it.producto, (m.get(it.producto) || 0) + (Number(it.cantidad) || 0)); return [...m.entries()].sort(); };
 
 /** Estado visible de una ruta del día. */
-const estadoRuta = (x) => x.estado === 'en_curso' ? ['En recorrido', 'violet'] : x.estado === 'terminada' ? ['Terminada', 'green']
+const estadoRuta = (x) => x.estado === 'en_curso' ? ['En ruta', 'violet'] : x.estado === 'terminada' ? ['Finalizada', 'green'] : x.estado === 'cancelada' ? ['Cancelada', 'gray']
   : !x.repartidor ? ['Disponible', 'amber'] : x.carga_confirmada ? ['Tomada · carga lista', 'blue'] : ['Tomada', 'blue'];
 
 /** Rutas del día (disponibles, tomadas, en recorrido) y creación de paquetes según los repartidores que salen. */
@@ -205,15 +205,207 @@ function Paquetes({ dia, origen, admin, perfil, onListo }) {
 
 /* =================== Entregas (Admin y Operador) =================== */
 export function Entregas({ perfil }) {
-  const [tab, setTab] = useState('vivo');
+  const [tab, setTab] = useState('panel');
   const [verRuta, setVerRuta] = useState(null);
+  const [detalle, setDetalle] = useState(null);
   if (verRuta) return html`<div class="stack"><button class="btn ghost back" onClick=${() => setVerRuta(null)}><${Icon} n="down2" size=${16} />Volver</button>
     <${MiRuta} perfil=${perfil} rutaId=${verRuta} /></div>`;
   return html`<div class="stack">
-    <div class="toolbar"><${Tabs} value=${tab} onChange=${setTab} items=${[{ v: 'vivo', label: 'En vivo' }, { v: 'planear', label: 'Planear rutas' }, { v: 'no', label: 'No entregados' }]} /></div>
-    ${tab === 'vivo' && html`<${EnVivo} onVer=${setVerRuta} onPlanear=${() => setTab('planear')} />`}
+    <div class="toolbar sticky-tabs"><${Tabs} value=${tab} onChange=${setTab} items=${[{ v: 'panel', label: 'Panel' }, { v: 'rutas', label: 'Rutas' }, { v: 'pedidos', label: 'Pedidos' }, { v: 'planear', label: 'Planear' }]} /></div>
+    ${tab === 'panel' && html`<${EnVivo} onVer=${setDetalle} onPlanear=${() => setTab('planear')} onPedidos=${() => setTab('pedidos')} onRutas=${() => setTab('rutas')} />`}
+    ${tab === 'rutas' && html`<${RutasLista} onVer=${setDetalle} />`}
+    ${tab === 'pedidos' && html`<${PedidosEstado} onRuta=${setDetalle} onPlanear=${() => setTab('planear')} />`}
     ${tab === 'planear' && html`<${Planear} onVer=${setVerRuta} />`}
-    ${tab === 'no' && html`<${NoEntregados} />`}
+    ${detalle && html`<${RutaDetalle} id=${detalle} onClose=${() => setDetalle(null)} onAbrir=${(id) => { setDetalle(null); setVerRuta(id); }} />`}
+  </div>`;
+}
+
+/* ---------- Rutas: listado con estado y progreso ---------- */
+const PERIODO_RUTAS = { hoy: 'Hoy', manana: 'Mañana', semana: 'Últimos 7 días', mes: 'Últimos 30 días' };
+function RutasLista({ onVer }) {
+  const [per, setPer] = useState('hoy');
+  const [est, setEst] = useState('todas');
+  const [buscar, setBuscar] = useState('');
+  const [desde, hasta] = per === 'hoy' ? [hoyISO(), hoyISO()] : per === 'manana' ? [isoDate(sumarDias(new Date(), 1)), isoDate(sumarDias(new Date(), 1))]
+    : [isoDate(sumarDias(new Date(), per === 'semana' ? -6 : -29)), isoDate(sumarDias(new Date(), 1))];
+  const r = useAsync(() => q(sb.rpc('panel_rutas', { p_desde: desde, p_hasta: hasta })), [desde, hasta]);
+  useEffect(() => { const t = setInterval(() => { if (!document.hidden) r.reload(); }, 20000); return () => clearInterval(t); }, [desde, hasta]);
+  const clave = (x) => x.estado === 'planeada' ? (x.repartidor ? 'tomada' : 'disponible') : x.estado;
+  const ESTS = [['todas', 'Todas'], ['disponible', 'Disponibles'], ['tomada', 'Tomadas'], ['en_curso', 'En ruta'], ['terminada', 'Finalizadas'], ['cancelada', 'Canceladas']];
+  const todas = r.data || [];
+  const lista = todas.filter((x) => (est === 'todas' ? x.estado !== 'cancelada' : clave(x) === est) && (!buscar || norm(['R-' + x.id, x.nombre, x.repartidor_nombre].join(' ')).includes(norm(buscar))));
+  return html`<div class="stack">
+    <div class="toolbar wrap-mobile">
+      <select class="input auto" value=${per} onChange=${(e) => setPer(e.target.value)} aria-label="Periodo">${Object.entries(PERIODO_RUTAS).map(([k, l]) => html`<option value=${k}>${l}</option>`)}</select>
+      <${SearchBox} value=${buscar} onInput=${setBuscar} placeholder="Buscar ruta o repartidor" />
+    </div>
+    <div class="chips scroll-x">${ESTS.map(([k, l]) => html`<button key=${k} class=${'chip-b' + (est === k ? ' on' : '')} onClick=${() => setEst(k)}>${l}<span class="chip-n">${k === 'todas' ? todas.filter((x) => x.estado !== 'cancelada').length : todas.filter((x) => clave(x) === k).length}</span></button>`)}</div>
+    <${ErrorBox} error=${r.error} onRetry=${r.reload} />
+    ${!r.data ? html`<${Loader} rows=${5} />` : !lista.length ? html`<${Card}><${Empty} icon="route" title="No hay rutas con este filtro">Crea rutas en la pestaña "Planear".<//><//>` :
+      html`<div class="rutas-tabla">
+        <div class="rt-head"><span>Ruta</span><span>Repartidor</span><span>Creada</span><span>Inicio</span><span>Fin</span><span>Pedidos</span><span>Progreso</span><span>Estado</span></div>
+        ${lista.map((x) => { const [et, tone] = estadoRuta(x), hechos = x.ok + x.no, pct = x.paradas ? Math.round((hechos / x.paradas) * 100) : 0;
+          return html`<button key=${x.id} class="rt-row" onClick=${() => onVer(x.id)}>
+            <span class="rt-id"><b>R-${x.id}</b><small>${x.nombre || ''} · ${fechaCorta(x.fecha)}</small></span>
+            <span class="rt-rep">${x.repartidor ? x.repartidor_nombre : html`<i class="muted">Sin tomar</i>`}</span>
+            <span class="rt-c" data-l="Creada">${fechaHora(x.creada)}</span>
+            <span class="rt-c" data-l="Inicio">${x.iniciada_en ? fechaHora(x.iniciada_en) : '—'}</span>
+            <span class="rt-c" data-l="Fin">${x.terminada_en ? fechaHora(x.terminada_en) : x.cancelada_en ? fechaHora(x.cancelada_en) : '—'}</span>
+            <span class="rt-c" data-l="Pedidos"><b>${x.paradas}</b> · ${num(x.canastas)} can.</span>
+            <span class="rt-prog"><span class="bar-mini"><i style=${{ width: pct + '%' }}></i></span><small>${hechos}/${x.paradas}${x.no ? ' · ' + x.no + ' fallidas' : ''}</small></span>
+            <span class="rt-est"><${Badge} tone=${tone}>${et}<//></span>
+          </button>`; })}
+      </div>`}
+  </div>`;
+}
+
+/* ---------- Detalle de una ruta ---------- */
+const EVENTOS = { creada: 'Ruta creada', tomada: 'Tomada por', liberada: 'Liberada', reasignada: 'Reasignada a', iniciada: 'Recorrido iniciado', finalizada: 'Ruta finalizada', cancelada: 'Ruta cancelada',
+  carga_confirmada: 'Carga confirmada', carga_sin_confirmar: 'Carga sin confirmar', pedido_agregado: 'Pedido agregado', pedido_retirado: 'Pedido retirado',
+  pedido_en_camino: 'En camino a', pedido_entregado: 'Entregado', pedido_no_entregado: 'No entregado', pedido_confirmado: 'Pedido vuelve a confirmado', pedido_cancelado: 'Pedido cancelado' };
+function RutaDetalle({ id, onClose, onAbrir }) {
+  const [tab, setTab] = useState('paradas');
+  const [dlg, setDlg] = useState(null);
+  const r = useAsync(async () => {
+    const [ruta, paradas, eventos] = await Promise.all([
+      q(sb.from('rutas').select('*').eq('id', id).maybeSingle()),
+      q(sb.from('v_entregas').select('id,estado,cliente,telefono,direccion_entrega,barrio,municipio,indicaciones,notas,lat,lng,orden_manual,canastas,items,entregado_en,motivo_no_entrega,entrega_obs,foto_entrega,total,pago_estado').eq('ruta_id', id).order('orden_manual', { nullsFirst: false })),
+      q(sb.from('rutas_eventos').select('*').eq('ruta_id', id).order('creado_en', { ascending: false }).limit(300))
+    ]);
+    let rep = null;
+    if (ruta && ruta.repartidor) rep = await q(sb.from('administradores').select('email,nombre,usuario,telefono').eq('email', ruta.repartidor).maybeSingle());
+    return { ruta, paradas, eventos, rep };
+  }, [id]);
+  const verFoto = async (path) => { const { data, error } = await sb.storage.from('entregas').createSignedUrl(path, 300); if (error) throw new Error(error.message); window.open(data.signedUrl, '_blank', 'noopener'); };
+  const d = r.data;
+  if (!d) return html`<${Drawer} title=${'Ruta R-' + id} onClose=${onClose}>${r.error ? html`<${ErrorBox} error=${r.error} onRetry=${r.reload} />` : html`<${Loader} rows=${6} />`}<//>`;
+  if (!d.ruta) return html`<${Drawer} title=${'Ruta R-' + id} onClose=${onClose}><${Empty} icon="route" title="Esta ruta ya no existe">Pudo deshacerse para volver a repartir sus pedidos.<//><//>`;
+  const ru = d.ruta, [et, tone] = estadoRuta({ ...ru, carga_confirmada: !!ru.carga_confirmada_en });
+  const ok = d.paradas.filter((p) => p.estado === 'entregado').length, no = d.paradas.filter((p) => p.estado === 'no_entregado').length;
+  const repNombre = d.rep ? d.rep.nombre || d.rep.usuario : null;
+  const accionRuta = async () => {
+    if (dlg.t === 'cancelar') { const n = await q(sb.rpc('panel_cancelar_ruta', { p_ruta: ru.id, p_motivo: dlg.motivo })); toast('Ruta cancelada: ' + n + ' pedido(s) quedaron disponibles'); }
+    else if (dlg.t === 'liberar') { await q(sb.rpc('panel_liberar_ruta', { p_ruta: ru.id, p_disolver: false })); toast('Ruta liberada: vuelve a estar disponible'); }
+    else if (dlg.t === 'finalizar') { await q(sb.rpc('panel_finalizar_ruta', { p_ruta: ru.id })); toast('Ruta finalizada'); }
+    setDlg(null); r.reload();
+  };
+  const pendientes = d.paradas.filter((p) => ABIERTA.includes(p.estado)).length;
+  return html`<${Drawer} title=${'Ruta R-' + ru.id + (ru.nombre ? ' · ' + ru.nombre : '')} sub=${fechaLarga(ru.fecha)} onClose=${onClose}
+    footer=${html`<div class="drawer-acts">
+      ${ru.estado === 'planeada' && ru.repartidor && html`<button class="btn ghost" onClick=${() => setDlg({ t: 'liberar' })}><${Icon} n="lock" size=${15} />Liberar</button>`}
+      ${ru.estado === 'en_curso' && !pendientes && html`<button class="btn" onClick=${() => setDlg({ t: 'finalizar' })}><${Icon} n="check" size=${15} />Finalizar</button>`}
+      ${['planeada', 'en_curso'].includes(ru.estado) && html`<button class="btn danger-ghost" onClick=${() => setDlg({ t: 'cancelar', motivo: '' })}><${Icon} n="x" size=${15} />Cancelar ruta</button>`}
+      <button class="btn primary" onClick=${() => onAbrir(ru.id)}><${Icon} n="pin" size=${15} />Abrir ruta</button></div>`}>
+    <div class="rd-head">
+      <${Badge} tone=${tone}>${et}<//>
+      <div class="rd-rep">${repNombre ? html`<${Icon} n="user" size=${15} /><b>${repNombre}</b>${d.rep.telefono && html`<a class="link" href=${'tel:' + d.rep.telefono}>${d.rep.telefono}</a>`}` : html`<span class="muted">Disponible: ningún repartidor la ha tomado</span>`}</div>
+    </div>
+    <div class="mini-kpis">
+      <div><b>${d.paradas.length}</b><span>Pedidos</span></div><div class="ok"><b>${ok}</b><span>Entregados</span></div><div class="no"><b>${no}</b><span>Incidencias</span></div>
+      <div><b>${fechaHora(ru.created_at)}</b><span>Creada</span></div><div><b>${ru.iniciada_en ? fechaHora(ru.iniciada_en) : '—'}</b><span>Inicio</span></div>
+      <div><b>${ru.terminada_en ? fechaHora(ru.terminada_en) : ru.cancelada_en ? fechaHora(ru.cancelada_en) : '—'}</b><span>${ru.cancelada_en ? 'Cancelada' : 'Fin'}</span></div>
+    </div>
+    ${ru.motivo_cancelacion && html`<div class="warn"><${Icon} n="alert" size=${15} />Motivo de cancelación: ${ru.motivo_cancelacion}</div>`}
+    <div class="rd-mapa"><${Mapa} origen=${{ lat: ru.origen_lat, lng: ru.origen_lng }} paradas=${d.paradas} actual=${(d.paradas.find((p) => p.estado === 'en_camino') || {}).id}
+      ubicacion=${ru.estado === 'en_curso' && ru.ultima_lat ? { lat: ru.ultima_lat, lng: ru.ultima_lng } : null} height=${260} /></div>
+    <${Tabs} value=${tab} onChange=${setTab} items=${[{ v: 'paradas', label: 'Paradas', n: d.paradas.length }, { v: 'incidencias', label: 'Incidencias', n: no }, { v: 'historial', label: 'Historial', n: d.eventos.length }]} />
+    ${tab === 'paradas' && html`<ol class="paradas detalle">${d.paradas.map((p, i) => html`<li key=${p.id} class=${'parada ' + p.estado}>
+      <span class="num">${p.estado === 'entregado' ? '✓' : p.estado === 'no_entregado' ? '!' : i + 1}</span>
+      <div class="ri-main"><b class="dir-main">${p.direccion_entrega}</b><span class="dir-sub">${[p.barrio, p.municipio].filter(Boolean).join(' · ')}</span>
+        <span class="ri-meta">#${p.id} · ${p.cliente}${p.telefono ? ' · ' + p.telefono : ''} · ${(p.items || []).map((it) => it.cantidad + ' ' + it.producto).join(', ')}</span>
+        ${p.indicaciones && html`<span class="ri-meta">📝 ${p.indicaciones}</span>`}
+        ${p.entregado_en && html`<span class="ri-meta">${p.estado === 'entregado' ? 'Entregado' : 'Intento'} ${fechaHora(p.entregado_en)}${p.entrega_obs ? ' · ' + p.entrega_obs : ''}</span>`}</div>
+      <div class="row-btns">${p.foto_entrega && html`<${AsyncButton} className="btn sm ghost" icon="external" onClick=${() => verFoto(p.foto_entrega)}>Foto<//>`}<${EstadoBadge} e=${p.estado} /></div>
+    </li>`)}</ol>`}
+    ${tab === 'incidencias' && (no ? html`<div class="list">${d.paradas.filter((p) => p.estado === 'no_entregado').map((p) => html`<div key=${p.id} class="row-item static">
+      <div class="ri-main"><b>#${p.id} · ${p.direccion_entrega}</b><span class="neg small">${MOTIVOS[p.motivo_no_entrega] || 'Sin motivo'}${p.entrega_obs ? ': ' + p.entrega_obs : ''}</span>
+        <span class="ri-meta">${p.cliente}${p.entregado_en ? ' · ' + fechaHora(p.entregado_en) : ''}</span></div></div>`)}</div>`
+      : html`<${Empty} icon="check" title="Sin incidencias en esta ruta" />`)}
+    ${tab === 'historial' && html`<div class="timeline">${d.eventos.map((e) => html`<div key=${e.id} class=${'tl ' + (e.evento.includes('no_entregado') || e.evento === 'cancelada' ? 'no' : e.evento.includes('entregado') || e.evento === 'finalizada' ? 'ok' : '')}>
+      <span class="tl-dot"></span><div><b>${EVENTOS[e.evento] || e.evento}${e.pedido_id ? ' #' + e.pedido_id : ''}${e.evento === 'tomada' || e.evento === 'reasignada' ? ' ' + nombreUsuario(e.detalle.ahora) : ''}</b>
+        <span class="muted small">${fechaHora(e.creado_en)} · ${e.usuario === 'sistema' ? 'Sistema' : nombreUsuario(e.usuario)}${e.detalle && e.detalle.motivo ? ' · ' + (MOTIVOS[e.detalle.motivo] || e.detalle.motivo) : ''}</span></div></div>`)}
+      ${!d.eventos.length && html`<${Empty} icon="history" title="Sin cambios registrados todavía" />`}</div>`}
+    ${dlg && html`<${Modal} title=${dlg.t === 'cancelar' ? 'Cancelar ruta R-' + ru.id : dlg.t === 'liberar' ? 'Liberar ruta R-' + ru.id : 'Finalizar ruta R-' + ru.id} onClose=${() => setDlg(null)}
+      footer=${html`<button class="btn ghost" onClick=${() => setDlg(null)}>Volver</button><${AsyncButton} className=${'btn ' + (dlg.t === 'cancelar' ? 'danger' : 'primary')} icon="check" onClick=${accionRuta}>Sí, continuar<//>`}>
+      <p>${dlg.t === 'cancelar' ? 'Los pedidos que aún no se han entregado vuelven a quedar disponibles para otra ruta. Los entregados y los no entregados conservan su historial en esta ruta.'
+        : dlg.t === 'liberar' ? 'La ruta deja de estar asignada a ' + (repNombre || 'el repartidor') + ' y vuelve a quedar disponible para que otro la tome.' : 'Todas las paradas tienen resultado. La ruta quedará como finalizada.'}</p>
+      ${dlg.t === 'cancelar' && html`<${Field} label="Motivo (opcional)"><input class="input" value=${dlg.motivo} onInput=${(e) => setDlg({ ...dlg, motivo: e.target.value })} /><//>`}
+    <//>`}
+  <//>`;
+}
+
+/* ---------- Pedidos por estado de asignación ---------- */
+const GRUPOS = [
+  ['disponibles', 'Disponibles', 'green', 'Sin ruta: se pueden usar para planear rutas.'],
+  ['asignados', 'Asignados', 'blue', 'En una ruta que aún no sale.'],
+  ['proceso', 'En proceso', 'violet', 'En una ruta en recorrido.'],
+  ['incidencias', 'Incidencias', 'red', 'No se pudieron entregar: reprográmalos o cancélalos.'],
+  ['finalizados', 'Finalizados', 'gray', 'Entregados o cancelados.']
+];
+function PedidosEstado({ onRuta, onPlanear }) {
+  const [dia, setDia] = useState(hoyISO());
+  const [g, setG] = useState('disponibles');
+  const [buscar, setBuscar] = useState('');
+  const [sel, setSel] = useState([]);
+  const [dlg, setDlg] = useState(null);
+  const r = useAsync(async () => {
+    const [pedidos, rutas, reps] = await Promise.all([
+      q(sb.from('v_entregas').select('id,estado,cliente,direccion_entrega,barrio,municipio,canastas,items,ruta_id,repartidor,entregado_en,motivo_no_entrega,lat,lng').eq('fecha_entrega', dia).order('id')),
+      q(sb.from('rutas').select('id,nombre,estado,repartidor').eq('fecha', dia)),
+      q(sb.from('administradores').select('email,nombre,usuario,capacidad_canastas').eq('rol', 'repartidor').eq('activo', true).order('usuario'))
+    ]);
+    return { pedidos, rutas, reps };
+  }, [dia]);
+  const grupo = (p, rutas) => {
+    const ru = p.ruta_id && rutas.find((x) => x.id === p.ruta_id);
+    if (p.estado === 'no_entregado') return 'incidencias';
+    if (['entregado', 'cancelado'].includes(p.estado)) return 'finalizados';
+    if (!p.ruta_id) return 'disponibles';
+    return ru && ru.estado === 'en_curso' ? 'proceso' : 'asignados';
+  };
+  const d = r.data;
+  const todos = d ? d.pedidos.map((p) => ({ ...p, grupo: grupo(p, d.rutas), ruta: d.rutas.find((x) => x.id === p.ruta_id) })) : [];
+  const lista = todos.filter((p) => p.grupo === g && (!buscar || norm([p.id, p.cliente, p.direccion_entrega, p.barrio].join(' ')).includes(norm(buscar))));
+  const repNombre = (e) => { const a = d && d.reps.find((x) => x.email === e); return a ? a.nombre || a.usuario : nombreUsuario(e); };
+  const crear = async () => {
+    const ps = todos.filter((p) => sel.includes(p.id));
+    const id = await q(sb.rpc('panel_guardar_ruta', { p_ruta: null, p_fecha: dia, p_repartidor: dlg.rep || null, p_origen_texto: leerOrigen().texto || null, p_origen_lat: leerOrigen().lat || null,
+      p_origen_lng: leerOrigen().lng || null, p_volver: true, p_paradas: ps.map((p) => ({ id: p.id, lat: p.lat, lng: p.lng, minutos: null })) }));
+    toast('Ruta R-' + id + ' creada ' + (dlg.rep ? 'y asignada a ' + repNombre(dlg.rep) : 'como disponible') + ' con ' + ps.length + ' pedido(s)');
+    setDlg(null); setSel([]); r.reload();
+  };
+  useEffect(() => setSel([]), [g, dia]);
+  return html`<div class="stack">
+    <div class="toolbar wrap-mobile">
+      <input class="input auto" type="date" value=${dia} onInput=${(e) => setDia(e.target.value)} aria-label="Día de entrega" />
+      <${SearchBox} value=${buscar} onInput=${setBuscar} placeholder="Buscar pedido, cliente o dirección" />
+    </div>
+    <div class="grupos">${GRUPOS.map(([k, l, tone]) => html`<button key=${k} class=${'grupo ' + tone + (g === k ? ' on' : '')} onClick=${() => setG(k)}><b>${todos.filter((p) => p.grupo === k).length}</b><span>${l}</span></button>`)}</div>
+    <p class="muted small">${(GRUPOS.find((x) => x[0] === g) || [])[3]}</p>
+    <${ErrorBox} error=${r.error} onRetry=${r.reload} />
+    ${g === 'incidencias' ? html`<${NoEntregados} />` : !d ? html`<${Loader} rows=${5} />` : !lista.length ? html`<${Card}><${Empty} icon="pedidos" title="No hay pedidos en este grupo" /><//>` : html`
+      <${Card} pad=${false}>
+        ${g === 'disponibles' && html`<div class="sel-bar"><label class="chk"><input type="checkbox" checked=${sel.length === lista.length} onChange=${() => setSel(sel.length === lista.length ? [] : lista.map((p) => p.id))} />Elegir todos</label>
+          <span class="muted small">${sel.length} elegido(s) · ${num(sum(todos.filter((p) => sel.includes(p.id)), 'canastas'))} canastas</span>
+          <button class="btn sm primary" disabled=${!sel.length} onClick=${() => setDlg({ rep: '' })}><${Icon} n="route" size=${14} />Crear ruta</button>
+          <button class="btn sm ghost" onClick=${onPlanear}><${Icon} n="spark" size=${14} />Repartir entre repartidores</button></div>`}
+        <div class="list">${lista.map((p) => html`<div key=${p.id} class=${'row-item static ped-row ' + p.grupo}>
+          ${g === 'disponibles' && html`<input type="checkbox" class="chk-big" checked=${sel.includes(p.id)} onChange=${() => setSel(sel.includes(p.id) ? sel.filter((x) => x !== p.id) : [...sel, p.id])} aria-label=${'Elegir pedido ' + p.id} />`}
+          <div class="ri-main"><b class="dir-main">#${p.id} · ${p.direccion_entrega}</b><span class="dir-sub">${[p.barrio, p.municipio].filter(Boolean).join(' · ')}</span>
+            <span class="ri-meta">${p.cliente} · ${(p.items || []).map((it) => it.cantidad + ' ' + it.producto).join(', ')}</span></div>
+          <div class="row-btns">
+            ${p.ruta ? html`<button class="btn sm ghost" onClick=${() => onRuta(p.ruta.id)}><${Icon} n="route" size=${13} />R-${p.ruta.id} · ${p.ruta.repartidor ? repNombre(p.ruta.repartidor) : 'disponible'}</button>` : g === 'disponibles' ? html`<${Badge} tone="green">Disponible<//>` : null}
+            <${EstadoBadge} e=${p.estado} /></div>
+        </div>`)}</div>
+      <//>`}
+    ${dlg && html`<${Modal} title=${'Crear ruta con ' + sel.length + ' pedido(s)'} onClose=${() => setDlg(null)}
+      footer=${html`<button class="btn ghost" onClick=${() => setDlg(null)}>Cancelar</button><${AsyncButton} className="btn primary" icon="check" onClick=${crear}>Crear ruta<//>`}>
+      <${Field} label="Repartidor" hint="Si la dejas disponible, cualquier repartidor podrá tomarla desde su celular.">
+        <select class="input" value=${dlg.rep} onChange=${(e) => setDlg({ ...dlg, rep: e.target.value })}><option value="">Disponible (sin repartidor)</option>
+          ${d.reps.map((x) => { const otra = d.rutas.find((ru) => ru.repartidor === x.email && ['planeada', 'en_curso'].includes(ru.estado));
+            return html`<option value=${x.email} disabled=${!!otra}>${x.nombre || x.usuario}${otra ? ' · ya tiene R-' + otra.id : ''}</option>`; })}</select><//>
+      <p class="muted small">Después puedes ordenarla en "Planear" o el repartidor la ordena desde su celular.</p>
+    <//>`}
   </div>`;
 }
 
@@ -225,13 +417,13 @@ const senal = (ru) => {
   return m <= 2 ? ['ok', 'En vivo'] : m <= 5 ? ['medio', 'Señal de hace ' + m + ' min'] : ['no', 'Sin señal hace ' + (m < 60 ? m + ' min' : Math.round(m / 60) + ' h')];
 };
 
-function EnVivo({ onVer, onPlanear }) {
+function EnVivo({ onVer, onPlanear, onPedidos, onRutas }) {
   const [dia, setDia] = useState(hoyISO());
   const [foco, setFoco] = useState(null);
   const [act, setAct] = useState(null);
   const r = useAsync(async () => {
     const [rutas, admins, sinRuta] = await Promise.all([
-      q(sb.from('rutas').select('*').eq('fecha', dia).order('id')),
+      q(sb.from('rutas').select('*').eq('fecha', dia).neq('estado', 'cancelada').order('id')),
       q(sb.from('administradores').select('email,nombre,usuario,telefono,capacidad_canastas').eq('rol', 'repartidor')),
       q(sb.from('v_entregas').select('id').eq('fecha_entrega', dia).is('ruta_id', null).in('estado', ['pendiente', 'confirmado', 'preparando']))
     ]);
@@ -272,12 +464,13 @@ function EnVivo({ onVer, onPlanear }) {
     </div>
     <${ErrorBox} error=${r.error} onRetry=${r.reload} />
     ${!d ? html`<${Loader} rows=${6} />` : html`
-    <div class="ctrl-kpis">
-      <div class="ck"><span>Repartidores en ruta</span><b>${enCurso.length}<small> / ${rutas.length} rutas</small></b></div>
-      <div class="ck"><span>Avance del día</span><b>${total ? Math.round((hechos / total) * 100) : 0}%<small> · ${hechos}/${total}</small></b><div class="rep-prog"><div style=${{ width: (total ? (hechos / total) * 100 : 0) + '%' }}></div></div></div>
-      <div class="ck ok"><span>Entregados</span><b>${num(sum(rutas, 'ok'))}</b></div>
-      <div class="ck no"><span>No entregados</span><b>${num(sum(rutas, 'no'))}</b></div>
-      <div class="ck"><span>Sin ruta</span><b>${num(d.sinRuta)}</b></div>
+    <div class="ctrl-kpis six">
+      <button class="ck" onClick=${onPedidos}><span>Disponibles para asignar</span><b>${num(d.sinRuta)}</b><small>pedidos sin ruta</small></button>
+      <button class="ck" onClick=${onPedidos}><span>Pedidos asignados</span><b>${num(sum(rutas, (x) => x.paradas.filter((p) => ABIERTA.includes(p.estado)).length))}</b><small>por entregar en rutas</small></button>
+      <button class="ck" onClick=${onRutas}><span>Rutas tomadas</span><b>${rutas.filter((x) => x.estado === 'planeada' && x.repartidor).length}</b><small>${rutas.filter((x) => x.estado === 'planeada' && !x.repartidor).length} disponibles sin tomar</small></button>
+      <button class="ck violet" onClick=${onRutas}><span>Rutas en curso</span><b>${enCurso.length}</b><small>${total ? Math.round((hechos / total) * 100) : 0}% del día completado</small></button>
+      <button class="ck ok" onClick=${onRutas}><span>Rutas finalizadas</span><b>${rutas.filter((x) => x.estado === 'terminada').length}</b><small>${num(sum(rutas, 'ok'))} entregas exitosas</small></button>
+      <button class="ck no" onClick=${onPedidos}><span>Entregas con inconvenientes</span><b>${num(sum(rutas, 'no'))}</b><small>por reprogramar</small></button>
     </div>
     <div class="ctrl-main">
       <div class="ctrl-map">
@@ -333,7 +526,8 @@ function Planear({ onVer }) {
   }, []);
   const [dia, setDia] = useState('');
   useEffect(() => { if (!dia && fechas.data && fechas.data.length) setDia(fechas.data.includes(hoyISO()) ? hoyISO() : fechas.data[0]); }, [fechas.data]);
-  const [rep, setRep] = useState(null);
+  const [rutaSel, setRutaSel] = useState(null);
+  const [rep, setRep] = useState('');
   const [origen, setOrigen] = useState(leerOrigen());
   const [volver, setVolver] = useState(true);
   const [destino, setDestino] = useState(VACIO);
@@ -344,23 +538,30 @@ function Planear({ onVer }) {
     if (!dia) return null;
     const [pedidos, rutas, reps, secretos] = await Promise.all([
       q(sb.from('v_entregas').select('*').eq('fecha_entrega', dia).order('orden_manual', { nullsFirst: false })),
-      q(sb.from('rutas').select('*').eq('fecha', dia)),
+      q(sb.from('rutas').select('*').eq('fecha', dia).neq('estado', 'cancelada').order('id')),
       q(sb.from('administradores').select('email,nombre,usuario,capacidad_canastas,activo,rol').eq('rol', 'repartidor').eq('activo', true).order('usuario')),
       q(sb.rpc('panel_secretos_configurados'))
     ]);
     return { pedidos, rutas, reps, google: (secretos || []).includes('google_maps_key') };
   }, [dia]);
-  useEffect(() => { if (d.data && rep === null) setRep(d.data.reps[0] ? d.data.reps[0].email : ''); }, [d.data]);
+  useEffect(() => {
+    if (!d.data) return;
+    if (rutaSel === null || (rutaSel !== 'nueva' && !d.data.rutas.some((x) => x.id === rutaSel))) {
+      const p = d.data.rutas.find((x) => x.estado === 'planeada') || d.data.rutas[0];
+      setRutaSel(p ? p.id : 'nueva');
+    }
+  }, [d.data]);
 
-  const ruta = d.data && rep !== null ? d.data.rutas.find((x) => (x.repartidor || '') === rep) : null;
+  const ruta = d.data && rutaSel && rutaSel !== 'nueva' ? d.data.rutas.find((x) => x.id === rutaSel) : null;
   useEffect(() => {
     setInfo(null);
-    if (!d.data || rep === null) return setLista(null);
+    if (!d.data || rutaSel === null) return setLista(null);
+    setRep(ruta ? ruta.repartidor || '' : '');
     const enRuta = ruta ? d.data.pedidos.filter((p) => p.ruta_id === ruta.id).sort((a, b) => (a.orden_manual ?? 99) - (b.orden_manual ?? 99)) : [];
     setLista(enRuta.map((p) => ({ id: p.id, lat: p.lat, lng: p.lng, minutos: p.minutos_tramo })));
     if (ruta && ruta.origen_texto) setOrigen({ texto: ruta.origen_texto, lat: ruta.origen_lat, lng: ruta.origen_lng });
     if (ruta) { setVolver(ruta.volver_origen !== false); setDestino(puntoDe(ruta, 'destino') || VACIO); }
-  }, [d.data, rep]);
+  }, [d.data, rutaSel]);
 
   if (fechas.loading && !fechas.data) return html`<${Loader} rows=${5} />`;
   if (fechas.data && !fechas.data.length) return html`<${Card}><${Empty} icon="truck" title="No hay pedidos por entregar">Cuando haya pedidos con fecha de entrega aparecerán aquí.<//><//>`;
@@ -373,7 +574,7 @@ function Planear({ onVer }) {
   const repSel = d.data ? d.data.reps.find((x) => x.email === rep) : null;
   const canastas = sum(filas, 'canastas');
   const guardadas = ruta ? pedidos.filter((p) => p.ruta_id === ruta.id).sort((a, b) => (a.orden_manual ?? 99) - (b.orden_manual ?? 99)).map((p) => p.id) : [];
-  const cambiado = JSON.stringify(filas.map((p) => p.id)) !== JSON.stringify(guardadas) || !!info;
+  const cambiado = JSON.stringify(filas.map((p) => p.id)) !== JSON.stringify(guardadas) || !!info || (!!ruta && (ruta.repartidor || '') !== rep);
   const editable = !ruta || ruta.estado === 'planeada';
   const pendientesRuta = filas.filter((p) => ABIERTA.includes(p.estado)).length;
 
@@ -394,15 +595,15 @@ function Planear({ onVer }) {
   };
   const guardar = async (silencioso) => {
     const id = await q(sb.rpc('panel_guardar_ruta', {
-      p_fecha: dia, p_repartidor: rep || null, p_origen_texto: origen.texto || null, p_origen_lat: origen.lat || null, p_origen_lng: origen.lng || null,
+      p_ruta: ruta ? ruta.id : null, p_fecha: dia, p_repartidor: rep || null, p_origen_texto: origen.texto || null, p_origen_lat: origen.lat || null, p_origen_lng: origen.lng || null,
       p_volver: volver, p_paradas: filas.map((p) => ({ id: p.id, lat: p.lat || null, lng: p.lng || null, minutos: p.minutos ?? null })),
       p_distancia_km: info ? info.distancia_km : null, p_duracion_min: info ? info.duracion_min : null,
       p_destino_texto: volver ? null : destino.texto || null, p_destino_lat: volver ? null : destino.lat || null, p_destino_lng: volver ? null : destino.lng || null
     }));
     localStorage.setItem(ORIGEN_KEY, JSON.stringify(origen));
     setInfo(null);
-    if (!silencioso) toast('Ruta guardada' + (repSel ? ' y asignada a ' + (repSel.nombre || repSel.usuario) : ''));
-    d.reload();
+    if (!silencioso) toast('Ruta R-' + id + ' guardada' + (repSel ? ' y asignada a ' + (repSel.nombre || repSel.usuario) : ' como disponible'));
+    setRutaSel(id); d.reload();
     return id;
   };
   const iniciar = async () => {
@@ -414,16 +615,24 @@ function Planear({ onVer }) {
 
   return html`
     <div class="plan-top">
-      <${Field} label="Día de entrega"><select class="input" value=${dia} onChange=${(e) => { setDia(e.target.value); setRep(null); }}>
+      <${Field} label="Día de entrega"><select class="input" value=${dia} onChange=${(e) => { setDia(e.target.value); setRutaSel(null); }}>
         ${(fechas.data || []).map((f) => html`<option value=${f}>${fechaLarga(f)}${f === hoyISO() ? ' (hoy)' : ''}</option>`)}</select><//>
-      <${Field} label="Repartidor"><select class="input" value=${rep || ''} onChange=${(e) => setRep(e.target.value)}>
-        ${(d.data ? d.data.reps : []).map((x) => html`<option value=${x.email}>${x.nombre || x.usuario}${x.capacidad_canastas ? ' · hasta ' + x.capacidad_canastas + ' canastas' : ''}</option>`)}
-        <option value="">Sin repartidor (solo planear)</option></select><//>
     </div>
     <${ErrorBox} error=${d.error} onRetry=${d.reload} />
     ${!d.data || lista === null ? html`<${Loader} rows=${5} />` : html`
-    <${Paquetes} key=${dia} dia=${dia} origen=${origen} admin=${true} onListo=${() => { setRep(null); d.reload(); }} />
-    <div class="section-title">Revisar o ajustar una ruta</div>
+    <${Paquetes} key=${dia} dia=${dia} origen=${origen} admin=${true} onListo=${() => { setRutaSel(null); d.reload(); }} />
+    <div class="section-title">Armar o ajustar una ruta a mano</div>
+    <div class="ruta-chips">${d.data.rutas.map((x) => { const [et, tone] = estadoRuta({ ...x, carga_confirmada: !!x.carga_confirmada_en }); const a = d.data.reps.find((r) => r.email === x.repartidor);
+      return html`<button key=${x.id} class=${'ruta-chip' + (rutaSel === x.id ? ' on' : '')} onClick=${() => setRutaSel(x.id)}><b>R-${x.id}</b><span>${a ? a.nombre || a.usuario : 'Disponible'}</span><i class=${'dot ' + tone}></i>${et}</button>`; })}
+      <button class=${'ruta-chip nueva' + (rutaSel === 'nueva' ? ' on' : '')} onClick=${() => setRutaSel('nueva')}><${Icon} n="plus" size=${14} /><b>Nueva ruta</b></button></div>
+    <div class="plan-top">
+      <${Field} label="Repartidor de esta ruta" hint="Déjala disponible para que un repartidor la tome desde su celular, o asígnala directamente.">
+        <select class="input" value=${rep} disabled=${!editable} onChange=${(e) => setRep(e.target.value)}>
+          <option value="">Disponible (sin repartidor)</option>
+          ${d.data.reps.map((x) => { const otra = d.data.rutas.find((r) => r.repartidor === x.email && ['planeada', 'en_curso'].includes(r.estado) && (!ruta || r.id !== ruta.id));
+            return html`<option value=${x.email} disabled=${!!otra}>${x.nombre || x.usuario}${x.capacidad_canastas ? ' · hasta ' + x.capacidad_canastas + ' canastas' : ''}${otra ? ' · ya tiene R-' + otra.id : ''}</option>`; })}
+        </select><//>
+    </div>
     <div class="grid-2 planner">
       <div class="stack">
         <${Card} title="Puntos del recorrido" icon="home" action=${ruta && html`<${Badge} tone=${(ESTADO_RUTA[ruta.estado] || [])[1]}>${(ESTADO_RUTA[ruta.estado] || [])[0]}<//>`}>
@@ -510,14 +719,14 @@ function NoEntregados() {
 }
 
 /* =================== Vista del repartidor =================== */
-export function MiRuta({ perfil, rutaId }) {
+function RutaActiva({ perfil, rutaId, onDisponibles }) {
   const gestor = perfil.rol !== 'repartidor';
   const r = useAsync(async () => {
     let ruta;
     if (rutaId) ruta = await q(sb.from('rutas').select('*').eq('id', rutaId).maybeSingle());
     else {
-      const rs = await q(sb.from('rutas').select('*').eq('repartidor', perfil.email).gte('fecha', isoDate(sumarDias(new Date(), -1))).order('fecha'));
-      ruta = rs.find((x) => x.estado === 'en_curso') || rs.find((x) => x.estado === 'planeada') || rs[rs.length - 1] || null;
+      const rs = await q(sb.from('rutas').select('*').eq('repartidor', perfil.email).in('estado', ['planeada', 'en_curso']).order('fecha'));
+      ruta = rs.find((x) => x.estado === 'en_curso') || rs.find((x) => x.fecha >= hoyISO()) || rs[rs.length - 1] || null;
     }
     if (!ruta) return { ruta: null, paradas: [] };
     const paradas = await q(sb.from('v_entregas').select('*').eq('ruta_id', ruta.id).order('orden_manual', { nullsFirst: false }));
@@ -550,7 +759,8 @@ export function MiRuta({ perfil, rutaId }) {
   if (r.error && !r.data) return html`<${ErrorBox} error=${r.error} onRetry=${r.reload} />`;
   const { ruta, paradas } = r.data;
   if (!ruta && gestor) return html`<${Card}><${Empty} icon="truck" title="No encontramos la ruta">Puede que se haya eliminado.<//><//>`;
-  if (!ruta || (!gestor && nueva)) return html`<${TomarPedidos} perfil=${perfil} onListo=${() => { setNueva(false); r.reload(); }} onCancelar=${ruta ? () => setNueva(false) : null} />`;
+  if (!ruta) return html`<${Card}><${Empty} icon="route" title="No tienes una ruta activa">Toma una de las rutas disponibles o arma la tuya con pedidos libres.<//>
+    <div class="center"><button class="btn primary" onClick=${onDisponibles}><${Icon} n="truck" size=${16} />Ver rutas disponibles</button></div><//>`;
   if (!gestor && editarPedidos) return html`<${TomarPedidos} perfil=${perfil} ruta=${ruta} actuales=${paradas.filter((p) => ABIERTA.includes(p.estado))}
     onListo=${() => { setEditarPedidos(false); r.reload(); }} onCancelar=${() => setEditarPedidos(false)} />`;
 
@@ -599,10 +809,11 @@ export function MiRuta({ perfil, rutaId }) {
       ${!puedeMarcar && html`<p class="muted small center">Confirma tu carga e inicia el recorrido para poder marcar las entregas.</p>`}
     </section>` : html`<section class="fin-ruta">
       <div class="empty-ico big"><${Icon} n="check" size=${34} /></div>
-      <h3>¡Recorrido completo!</h3>
+      <h3>${ruta.estado === 'planeada' ? 'Ruta sin pedidos' : '¡Recorrido completo!'}</h3>
       <p>${ok} entregados${paradas.length - ok ? ' · ' + (paradas.length - ok) + ' no entregados' : ''}${ruta.iniciada_en && ruta.terminada_en ? ' · ' + Math.round((new Date(ruta.terminada_en) - new Date(ruta.iniciada_en)) / 60000) + ' min en ruta' : ''}</p>
       <p class="muted">${ruta.estado === 'planeada' ? 'Tu ruta no tiene pedidos todavía.' : '¡Buen trabajo! 🥚'}</p>
-      ${!gestor && html`<button class="btn primary" onClick=${() => ruta.estado === 'planeada' ? setEditarPedidos(true) : setNueva(true)}><${Icon} n="plus" size=${16} />${ruta.estado === 'planeada' ? 'Elegir pedidos' : 'Armar una nueva ruta'}</button>`}
+      ${ruta.estado === 'en_curso' && html`<${AsyncButton} className="btn primary" icon="check" onClick=${async () => { await q(sb.rpc('panel_finalizar_ruta', { p_ruta: ruta.id })); toast('Ruta finalizada. ¡Buen trabajo!'); r.reload(); }}>Finalizar ruta<//>`}
+      ${!gestor && ruta.estado === 'planeada' && html`<button class="btn primary" onClick=${() => setEditarPedidos(true)}><${Icon} n="plus" size=${16} />Elegir pedidos</button>`}
     </section>`}
 
     <${Card} title="Mapa" icon="pin" pad=${false} action=${html`<button class="btn sm ghost" onClick=${() => setVerMapa(!verMapa)}>${verMapa ? 'Ocultar' : 'Mostrar'}</button>`}>
@@ -643,6 +854,36 @@ export function MiRuta({ perfil, rutaId }) {
   </div>`;
 }
 
+/* ---------- Inicio del repartidor: Mi ruta · Disponibles · Historial ---------- */
+export function MiRuta({ perfil, rutaId }) {
+  const [tab, setTab] = useState('ruta');
+  const [k, setK] = useState(0);
+  if (rutaId) return html`<${RutaActiva} perfil=${perfil} rutaId=${rutaId} />`;
+  return html`<div class="stack">
+    <div class="toolbar sticky-tabs"><${Tabs} value=${tab} onChange=${setTab} items=${[{ v: 'ruta', label: 'Mi ruta' }, { v: 'disponibles', label: 'Disponibles' }, { v: 'historial', label: 'Historial' }]} /></div>
+    ${tab === 'ruta' && html`<${RutaActiva} key=${k} perfil=${perfil} onDisponibles=${() => setTab('disponibles')} />`}
+    ${tab === 'disponibles' && html`<${TomarPedidos} perfil=${perfil} onListo=${() => { setK(k + 1); setTab('ruta'); }} />`}
+    ${tab === 'historial' && html`<${HistorialRepartidor} perfil=${perfil} />`}
+  </div>`;
+}
+
+function HistorialRepartidor({ perfil }) {
+  const r = useAsync(() => q(sb.rpc('panel_repartidor_stats', { p_email: perfil.email, p_desde: isoDate(sumarDias(new Date(), -59)), p_hasta: hoyISO() })), []);
+  const d = r.data;
+  const exito = d && d.entregados + d.fallidos ? Math.round((d.entregados / (d.entregados + d.fallidos)) * 100) : null;
+  return html`<div class="stack">
+    <${ErrorBox} error=${r.error} onRetry=${r.reload} />
+    ${!d ? html`<${Loader} rows=${4} />` : html`
+      <div class="mini-kpis"><div class="ok"><b>${num(d.entregados)}</b><span>Entregados</span></div><div class="no"><b>${num(d.fallidos)}</b><span>No entregados</span></div>
+        <div><b>${exito == null ? '—' : exito + '%'}</b><span>Éxito</span></div><div><b>${num(d.rutas_total)}</b><span>Rutas</span></div></div>
+      <p class="muted small">Últimos 60 días.</p>
+      <${Card} title="Mis rutas" icon="route" pad=${false}>${!d.rutas.length ? html`<${Empty} icon="route" title="Aún no tienes rutas" />` :
+        html`<div class="list">${d.rutas.map((x) => html`<div key=${x.id} class="row-item static">
+          <div class="ri-main"><b>R-${x.id} · ${fechaCorta(x.fecha)}</b><span class="ri-meta">${x.paradas} pedidos · ${x.ok} entregados${x.no ? ' · ' + x.no + ' no entregados' : ''}${x.iniciada_en && x.terminada_en ? ' · ' + Math.round((new Date(x.terminada_en) - new Date(x.iniciada_en)) / 60000) + ' min' : ''}</span></div>
+          <${Badge} tone=${(ESTADO_RUTA[x.estado] || [])[1]}>${(ESTADO_RUTA[x.estado] || [])[0]}<//></div>`)}</div>`}<//>`}
+  </div>`;
+}
+
 /** Antes de salir: confirmar la carga, elegir inicio y final, ordenar la ruta e iniciar. */
 function PrepararRuta({ ruta, pendientes, gestor, onCambio, onPedidos }) {
   const [liberando, setLiberando] = useState(false);
@@ -668,7 +909,7 @@ function PrepararRuta({ ruta, pendientes, gestor, onCambio, onPedidos }) {
     const x = await accion({ accion: 'ruta_optimizar', fecha: ruta.fecha, ids: pendientes.map((p) => p.id), origen, volver: mismo, destino: mismo ? null : destino });
     const d = x.data, o = d.origen && d.origen.lat ? { ...origen, lat: d.origen.lat, lng: d.origen.lng } : origen;
     const f = !mismo && d.destino && d.destino.lat ? { ...destino, lat: d.destino.lat, lng: d.destino.lng } : destino;
-    await q(sb.rpc('panel_guardar_ruta', { p_fecha: ruta.fecha, p_repartidor: ruta.repartidor, p_origen_texto: o.texto || null, p_origen_lat: o.lat || null, p_origen_lng: o.lng || null,
+    await q(sb.rpc('panel_guardar_ruta', { p_ruta: ruta.id, p_fecha: ruta.fecha, p_repartidor: ruta.repartidor, p_origen_texto: o.texto || null, p_origen_lat: o.lat || null, p_origen_lng: o.lng || null,
       p_volver: mismo, p_paradas: d.paradas.map((p) => ({ id: p.id, lat: p.lat, lng: p.lng, minutos: p.minutos })), p_distancia_km: d.distancia_km, p_duracion_min: d.duracion_min,
       p_destino_texto: mismo ? null : f.texto || null, p_destino_lat: mismo ? null : f.lat || null, p_destino_lng: mismo ? null : f.lng || null }));
     localStorage.setItem(ORIGEN_KEY, JSON.stringify(o));
@@ -710,6 +951,8 @@ function PrepararRuta({ ruta, pendientes, gestor, onCambio, onPedidos }) {
 /** El repartidor elige los pedidos disponibles para crear o ajustar su propia ruta. */
 function TomarPedidos({ perfil, ruta, actuales = [], onListo, onCancelar }) {
   const r = useAsync(() => q(sb.rpc('panel_pedidos_disponibles', { p_fecha: null })), []);
+  const mia = useAsync(() => ruta || perfil.rol !== 'repartidor' ? Promise.resolve(null) : q(sb.from('rutas').select('id,fecha,estado').eq('repartidor', perfil.email).in('estado', ['planeada', 'en_curso']).limit(1)).then((x) => x[0] || null), []);
+  const bloqueado = !ruta && !!mia.data;
   const fechas = r.data ? [...new Set(r.data.map((p) => p.fecha_entrega).concat(ruta ? [ruta.fecha] : []))].sort() : [];
   const [dia, setDia] = useState(ruta ? ruta.fecha : '');
   useEffect(() => { if (!dia && fechas.length) setDia(fechas.includes(hoyISO()) ? hoyISO() : fechas[0]); }, [r.data]);
@@ -723,24 +966,25 @@ function TomarPedidos({ perfil, ruta, actuales = [], onListo, onCancelar }) {
     if (!elegidos.length && !ruta) throw new Error('Elige al menos un pedido.');
     const o = (ruta && puntoDe(ruta, 'origen')) || leerOrigen();
     const orden = actuales.filter((p) => sel.includes(p.id)).concat(disponibles.filter((p) => sel.includes(p.id)));
-    await q(sb.rpc('panel_guardar_ruta', { p_fecha: ruta ? ruta.fecha : dia, p_repartidor: perfil.email, p_origen_texto: o.texto || null, p_origen_lat: o.lat || null, p_origen_lng: o.lng || null,
+    await q(sb.rpc('panel_guardar_ruta', { p_ruta: ruta ? ruta.id : null, p_fecha: ruta ? ruta.fecha : dia, p_repartidor: perfil.email, p_origen_texto: o.texto || null, p_origen_lat: o.lat || null, p_origen_lng: o.lng || null,
       p_volver: ruta ? ruta.volver_origen !== false : true, p_paradas: orden.map((p) => ({ id: p.id, lat: p.lat || null, lng: p.lng || null, minutos: null })),
       p_destino_texto: ruta ? ruta.destino_texto : null, p_destino_lat: ruta ? ruta.destino_lat : null, p_destino_lng: ruta ? ruta.destino_lng : null }));
     toast(ruta ? 'Pedidos de tu ruta actualizados' : '¡Ruta creada! Ahora confirma tu carga y ordénala.');
     onListo();
   };
 
-  return html`<div class="stack ruta-view con-barra">
-    <section class="ruta-head"><div><span class="hero-kicker">${ruta ? fechaLarga(ruta.fecha) : 'Nueva ruta'}</span>
-      <h2>${ruta ? 'Pedidos de tu ruta' : 'Arma tu ruta'}</h2><span>Elige los pedidos que vas a entregar.</span></div></section>
+  return html`<div class=${'stack ruta-view' + (bloqueado ? '' : ' con-barra')}>
+    <section class="ruta-head"><div><span class="hero-kicker">${ruta ? fechaLarga(ruta.fecha) : 'Rutas disponibles'}</span>
+      <h2>${ruta ? 'Pedidos de tu ruta' : 'Toma o arma tu ruta'}</h2><span>${ruta ? 'Elige los pedidos que vas a entregar.' : 'Las rutas que toma otro repartidor dejan de aparecer aquí.'}</span></div></section>
+    ${bloqueado && html`<div class="info"><${Icon} n="route" size=${16} /><span>Ya tienes la ruta R-${mia.data.id} (${mia.data.estado === 'en_curso' ? 'en recorrido' : 'por iniciar'}). Para tomar otra, libérala primero en "Mi ruta".</span></div>`}
     <${ErrorBox} error=${r.error} onRetry=${r.reload} />
     ${!r.data ? html`<${Loader} rows=${5} />` : !lista.length && !fechas.length ? html`<${Card}><${Empty} icon="check" title="No hay pedidos por entregar">Cuando lleguen pedidos sin repartidor aparecerán aquí.<//>
         <div class="center"><button class="btn" onClick=${r.reload}><${Icon} n="refresh" size=${16} />Revisar de nuevo</button></div><//>` : html`
       ${!ruta && html`<${Field} label="Día de entrega"><select class="input" value=${dia} onChange=${(e) => { setDia(e.target.value); setSel([]); }}>
         ${fechas.map((f) => html`<option value=${f}>${fechaLarga(f)}${f === hoyISO() ? ' (hoy)' : ''}</option>`)}</select><//>`}
       ${!ruta && dia && html`<${Paquetes} key=${dia} dia=${dia} origen=${leerOrigen()} perfil=${perfil} onListo=${onListo} />
-        ${lista.length > 0 && html`<div class="section-title">O arma tu ruta eligiendo pedidos libres</div>`}`}
-      <${Card} title=${lista.length + ' pedido(s)'} icon="pedidos" pad=${false}
+        ${lista.length > 0 && !bloqueado && html`<div class="section-title">O arma tu ruta eligiendo pedidos libres</div>`}`}
+      ${!bloqueado && html`<${Card} title=${lista.length + ' pedido(s) libres'} icon="pedidos" pad=${false}
         action=${lista.length > 0 && html`<button class="btn sm ghost" onClick=${() => setSel(sel.length === lista.length ? [] : lista.map((p) => p.id))}>${sel.length === lista.length ? 'Quitar todos' : 'Elegir todos'}</button>`}>
         ${!lista.length ? html`<${Empty} icon="check" title="No hay pedidos libres ese día" />` :
         html`<div class="checklist pad">${lista.map((p) => html`<label key=${p.id} class=${'check-item' + (sel.includes(p.id) ? ' on' : '')}>
@@ -748,12 +992,12 @@ function TomarPedidos({ perfil, ruta, actuales = [], onListo, onCancelar }) {
           <span class="ci-txt"><b class="dir-main">${p.direccion_entrega || 'Sin dirección'}</b><span class="dir-sub">${[p.barrio, p.municipio].filter(Boolean).join(' · ')}</span>
             <span class="ri-meta">${p.cliente} · #${p.id}${(p.items || []).length ? ' · ' + p.items.map((it) => it.cantidad + ' ' + it.producto).join(', ') : ''}</span></span>
           <b>${num(p.canastas)}<small class="muted"> can.</small></b></label>`)}</div>`}
-      <//>`}
-    <div class="entrega-bar">
+      <//>`}`}
+    ${!bloqueado && html`<div class="entrega-bar">
       ${onCancelar ? html`<button class="btn ghost" onClick=${onCancelar}>Cancelar</button>` : html`<div class="ab-info dark"><b>${elegidos.length} pedidos</b><span>${num(canastas)}${cap ? ' de ' + cap : ''} canastas</span></div>`}
       <${AsyncButton} className="btn primary" icon="check" disabled=${!r.data || (!ruta && !elegidos.length)} onClick=${guardar}>
         ${ruta ? 'Guardar (' + elegidos.length + ')' : 'Crear mi ruta (' + elegidos.length + ')'}<//>
-    </div>
+    </div>`}
     ${cap > 0 && canastas > cap && html`<div class="warn"><${Icon} n="alert" size=${16} />Llevas ${num(canastas)} canastas y tu capacidad es ${cap}.</div>`}
   </div>`;
 }

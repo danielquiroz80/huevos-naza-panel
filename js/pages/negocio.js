@@ -111,7 +111,7 @@ function Configuracion({ perfil }) {
 }
 
 function Equipo({ perfil }) {
-  const r = useAsync(() => q(sb.from('administradores').select('*').order('rol').order('nombre')), []);
+  const r = useAsync(() => q(sb.from('administradores').select('*').neq('rol', 'repartidor').order('rol').order('nombre')), []);
   const [dlg, setDlg] = useState(null);
   const set = (k) => (e) => setDlg({ ...dlg, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value });
   const guardar = async () => {
@@ -133,8 +133,9 @@ function Equipo({ perfil }) {
   const reglas = (c) => html`<ul class="reglas">${REGLAS_CLAVE.map((x) => html`<li key=${x.t} class=${x.f(c || '') ? 'ok' : ''}><${Icon} n=${x.f(c || '') ? 'check' : 'x'} size=${13} />${x.t}</li>`)}</ul>`;
   const d = r.data;
   return html`<div class="stack">
-    <${Card} title="Usuarios" icon="users" pad=${false}
-      action=${html`<button class="btn sm primary" onClick=${() => setDlg({ t: 'nuevo', usuario: '', nombre: '', rol: 'repartidor', clave: sugerirClave(), correo: '', telefono: '', capacidad_canastas: '' })}><${Icon} n="plus" size=${14} />Agregar usuario</button>`}>
+    <div class="info"><${Icon} n="idcard" size=${16} /><span>Aquí están los administradores y operadores. Los repartidores se crean y gestionan en la sección <a class="link" href="#/repartidores">Repartidores</a>.</span></div>
+    <${Card} title="Administradores y operadores" icon="users" pad=${false}
+      action=${html`<button class="btn sm primary" onClick=${() => setDlg({ t: 'nuevo', usuario: '', nombre: '', rol: 'operador', clave: sugerirClave(), correo: '', telefono: '', capacidad_canastas: '' })}><${Icon} n="plus" size=${14} />Agregar usuario</button>`}>
       <${ErrorBox} error=${r.error} onRetry=${r.reload} />
       ${!d ? html`<div class="card-body"><${Loader} /></div>` : html`<div class="list">${d.map((a) => html`<div class="row-item static" key=${a.email}>
         <div class="avatar soft">${(a.nombre || a.usuario || a.email).slice(0, 1).toUpperCase()}</div>
@@ -151,7 +152,7 @@ function Equipo({ perfil }) {
         ${dlg.t === 'nuevo' && html`<${Field} label="Usuario" hint="Sin espacios ni tildes. Ej.: carlos"><input class="input" autocapitalize="none" value=${dlg.usuario} onInput=${(e) => setDlg({ ...dlg, usuario: e.target.value.toLowerCase().replace(/\s+/g, '') })} /><//>`}
         <${Field} label="Nombre"><input class="input" value=${dlg.nombre || ''} onInput=${set('nombre')} placeholder="Nombre y apellido" /><//>
         <${Field} label="Rol"><select class="input" value=${dlg.rol} onChange=${set('rol')} disabled=${dlg.email === perfil.email}>
-          <option value="repartidor">Repartidor</option><option value="operador">Operador</option><option value="dueno">Admin</option></select><//>
+          <option value="operador">Operador</option><option value="dueno">Admin</option></select><//>
         <${Field} label="Correo (opcional)" hint="Sirve para recuperar la contraseña"><input class="input" type="email" autocapitalize="none" value=${dlg.correo || ''} onInput=${set('correo')} /><//>
         <${Field} label="Teléfono (opcional)"><input class="input" type="tel" value=${dlg.telefono || ''} onInput=${set('telefono')} /><//>
         ${dlg.rol === 'repartidor' && html`<${Field} label="Capacidad (canastas)" hint="Cuántas caben en su vehículo"><input class="input" type="number" min="1" value=${dlg.capacidad_canastas} onInput=${set('capacidad_canastas')} /><//>`}

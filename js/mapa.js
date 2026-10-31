@@ -1,6 +1,8 @@
 import L from 'https://esm.sh/leaflet@1.9.4';
 import { html, useEffect, useRef } from './ui.js';
 
+const esc = (t) => String(t == null ? '' : t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const ESTADO_TXT = { pendiente: 'Pendiente', confirmado: 'Confirmado', preparando: 'Preparando', en_camino: 'En camino', entregado: 'Entregado', no_entregado: 'No entregado' };
 export const COLORES_RUTA = ['#3E6FB6', '#7B5CC4', '#2E9E6A', '#E2463C', '#D98A00', '#1F8A9E'];
 const pin = (texto, clase, color) => L.divIcon({
   className: 'pin-wrap',
@@ -10,9 +12,23 @@ const pin = (texto, clase, color) => L.divIcon({
 const camion = (color) => L.divIcon({ className: 'pin-wrap', html: `<div class="pin truck" style="--c:${color}"><span>🚚</span></div>`, iconSize: [38, 38], iconAnchor: [19, 19] });
 
 function useMapa(caja) {
-  const mapa = useRef(null), capa = useRef(null);
+  const mapa = useRef(null), capa = useRef(null), puntos = useRef([]);
   useEffect(() => {
-    const m = L.map(caja.current, { zoomControl: true, scrollWheelZoom: false, tap: true });
+    // Zoom con botones visibles (arriba a la derecha, libres de otros elementos), con la rueda del mouse y con los dedos.
+    const m = L.map(caja.current, { zoomControl: false, scrollWheelZoom: true, wheelPxPerZoomLevel: 90, tap: true });
+    L.control.zoom({ position: 'topright', zoomInTitle: 'Acercar', zoomOutTitle: 'Alejar' }).addTo(m);
+    const Ajustar = L.Control.extend({
+      options: { position: 'topright' },
+      onAdd() {
+        const b = L.DomUtil.create('button', 'map-fit leaflet-bar');
+        b.type = 'button'; b.title = 'Ver toda la ruta'; b.setAttribute('aria-label', 'Ver toda la ruta');
+        b.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/></svg>';
+        L.DomEvent.disableClickPropagation(b);
+        L.DomEvent.on(b, 'click', () => { if (puntos.current.length) m.fitBounds(puntos.current, { padding: [40, 40], maxZoom: 15 }); });
+        return b;
+      }
+    });
+    new Ajustar().addTo(m);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(m);
     m.setView([6.2442, -75.5812], 12);
     capa.current = L.layerGroup().addTo(m);
@@ -22,13 +38,13 @@ function useMapa(caja) {
     ro.observe(caja.current);
     return () => { clearTimeout(t); ro.disconnect(); m.remove(); };
   }, []);
-  return [mapa, capa];
+  return [mapa, capa, puntos];
 }
 
 /** Una ruta: punto de salida y paradas numeradas en orden. */
 export function Mapa({ origen, destino, paradas = [], height = 320, actual, ubicacion }) {
   const caja = useRef(null);
-  const [mapa, capa] = useMapa(caja);
+  const [mapa, capa, puntos] = useMapa(caja);
   const firma = JSON.stringify([origen && origen.lat, origen && origen.lng, destino && destino.lat, destino && destino.lng, actual, ubicacion, paradas.map((p) => [p.id, p.lat, p.lng, p.estado])]);
   useEffect(() => {
     const m = mapa.current, g = capa.current;
@@ -41,7 +57,8 @@ export function Mapa({ origen, destino, paradas = [], height = 320, actual, ubic
     paradas.forEach((p, i) => {
       if (!p.lat || !p.lng) return;
       const clase = p.estado === 'entregado' ? 'ok' : p.estado === 'no_entregado' ? 'no' : p.id === actual ? 'actual' : '';
-      L.marker([p.lat, p.lng], { icon: pin(i + 1, clase) }).addTo(g).bindTooltip(`${i + 1}. ${p.cliente || ''}`);
+      L.marker([p.lat, p.lng], { icon: pin(i + 1, clase) }).addTo(g).bindTooltip(`${i + 1}. ${p.cliente || ''}`)
+        .bindPopup(`<b>${i + 1}. ${esc(p.direccion_entrega || '')}</b><br>${esc([p.barrio, p.municipio].filter(Boolean).join(' · '))}<br>${esc(p.cliente || '')} · ${esc(ESTADO_TXT[p.estado] || p.estado || '')}`);
       pts.push([p.lat, p.lng]); linea.push([p.lat, p.lng]);
     });
     const fin = destino && destino.lat ? destino : null;
@@ -49,6 +66,7 @@ export function Mapa({ origen, destino, paradas = [], height = 320, actual, ubic
     if (fin && linea.length) linea.push([fin.lat, fin.lng]);
     if (linea.length > 1) L.polyline(linea, { color: '#F7B016', weight: 4, opacity: 0.85, dashArray: '6 8' }).addTo(g);
     if (ubicacion && ubicacion.lat) { L.marker([ubicacion.lat, ubicacion.lng], { icon: camion('#241F35') }).addTo(g).bindTooltip('Tu ubicación'); pts.push([ubicacion.lat, ubicacion.lng]); }
+    puntos.current = pts;
     if (pts.length) m.fitBounds(pts, { padding: [36, 36], maxZoom: 15 });
   }, [firma]);
   return html`<div ref=${caja} class="mapa" style=${{ height: height + 'px' }}></div>`;
@@ -58,7 +76,7 @@ export function Mapa({ origen, destino, paradas = [], height = 320, actual, ubic
  *  Solo reencuadra la primera vez o al enfocar un repartidor, para no mover el mapa en cada actualización. */
 export function MapaRutas({ rutas = [], height = 380, foco = null, onFoco }) {
   const caja = useRef(null);
-  const [mapa, capa] = useMapa(caja);
+  const [mapa, capa, puntos] = useMapa(caja);
   const motos = useRef(new Map());
   const encuadrado = useRef(false);
   const firma = JSON.stringify(rutas.map((r) => [r.id, r.color, r.estado, r.paradas.map((p) => [p.id, p.estado, p.lat, p.lng])]));
@@ -74,12 +92,14 @@ export function MapaRutas({ rutas = [], height = 380, foco = null, onFoco }) {
       r.paradas.forEach((p, i) => {
         if (!p.lat) return;
         const clase = p.estado === 'entregado' ? 'ok' : p.estado === 'no_entregado' ? 'no' : p.estado === 'en_camino' ? 'actual color' : 'color';
-        L.marker([p.lat, p.lng], { icon: pin(i + 1, clase, r.color) }).addTo(g).bindTooltip(`${r.nombre} · ${i + 1}. ${p.direccion_entrega || p.cliente || ''}`);
+        L.marker([p.lat, p.lng], { icon: pin(i + 1, clase, r.color) }).addTo(g).bindTooltip(`${r.nombre} · ${i + 1}. ${p.direccion_entrega || p.cliente || ''}`)
+          .bindPopup(`<b>${esc(r.nombre)} · parada ${i + 1}</b><br>${esc(p.direccion_entrega || '')}<br>${esc(p.cliente || '')} · ${esc(ESTADO_TXT[p.estado] || p.estado || '')}`);
         pts.push([p.lat, p.lng]); linea.push([p.lat, p.lng]);
       });
       if (linea.length > 1) L.polyline(linea, { color: r.color, weight: 4, opacity: r.estado === 'en_curso' ? 0.85 : 0.45, dashArray: r.estado === 'en_curso' ? null : '6 8' }).addTo(g);
       if (r.ultima_lat) pts.push([r.ultima_lat, r.ultima_lng]);
     });
+    puntos.current = pts;
     if (!encuadrado.current && pts.length) { m.fitBounds(pts, { padding: [40, 40], maxZoom: 14 }); encuadrado.current = true; }
   }, [firma]);
   // Repartidores en vivo: se mueven sin redibujar todo.

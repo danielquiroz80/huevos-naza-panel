@@ -11,12 +11,16 @@ import { Estadisticas } from './pages/estadisticas.js';
 import { Planeacion } from './pages/planeacion.js';
 import { Negocio } from './pages/negocio.js';
 import { Entregas, MiRuta } from './pages/entregas.js';
+import { Repartidores } from './pages/repartidores.js';
+import { Reportes } from './pages/reportes.js';
 
 const TODAS = [
   { id: 'inicio', label: 'Inicio', icon: 'home', C: Inicio, roles: ['dueno'] },
   { id: 'pedidos', label: 'Pedidos', icon: 'pedidos', C: Pedidos, roles: ['dueno', 'operador'] },
   { id: 'entregas', label: 'Entregas', icon: 'truck', C: Entregas, roles: ['dueno', 'operador'] },
-  { id: 'ruta', label: 'Mi ruta', icon: 'pin', C: MiRuta, roles: ['repartidor'] },
+  { id: 'ruta', label: 'Mis rutas', icon: 'route', C: MiRuta, roles: ['repartidor'] },
+  { id: 'repartidores', label: 'Repartidores', icon: 'idcard', C: Repartidores, roles: ['dueno'] },
+  { id: 'reportes', label: 'Reportes', icon: 'file', C: Reportes, roles: ['dueno'] },
   { id: 'productos', label: 'Productos', icon: 'box', C: Productos, roles: ['dueno'] },
   { id: 'clientes', label: 'Clientes', icon: 'users', C: Clientes, roles: ['dueno'] },
   { id: 'compras', label: 'Compras', icon: 'cart', C: Compras, roles: ['dueno'] },
@@ -24,7 +28,7 @@ const TODAS = [
   { id: 'planeacion', label: 'Planeación', icon: 'calendar', C: Planeacion, roles: ['dueno'] },
   { id: 'negocio', label: 'Administración', icon: 'store', C: Negocio, roles: ['dueno'] }
 ];
-const MOVIL = { dueno: ['inicio', 'pedidos', 'entregas', 'productos'], operador: ['pedidos', 'entregas'], repartidor: ['ruta'] };
+const MOVIL = { dueno: ['inicio', 'pedidos', 'entregas', 'repartidores'], operador: ['pedidos', 'entregas'], repartidor: ['ruta'] };
 
 function rutaActual(rutas) {
   const h = location.hash.replace(/^#\/?/, '').split(/[?&]/)[0];
@@ -158,38 +162,46 @@ function SinAcceso({ email }) {
 }
 
 /* ---------- Mi cuenta: contraseña y huella ---------- */
+/* ---------- Menú de la cuenta: opciones en un menú, cada una en su propia vista ---------- */
 function MiCuenta({ perfil, onClose }) {
+  const [vista, setVista] = useState('menu');
   const [c1, setC1] = useState('');
   const [c2, setC2] = useState('');
   const [bio, setBio] = useState(!!bioConfig(perfil.email));
   const [puedeBio, setPuedeBio] = useState(false);
   useEffect(() => { bioDisponible().then(setPuedeBio); }, []);
+  const nombre = perfil.nombre || nombreUsuario(perfil.email);
   const cambiar = async () => {
     const err = claveInvalida(c1); if (err) throw new Error(err);
     if (c1 !== c2) throw new Error('Las dos contraseñas no coinciden.');
     const { error } = await sb.auth.updateUser({ password: c1 });
     if (error) throw new Error(/different|same/i.test(error.message) ? 'Usa una contraseña diferente a la anterior.' : error.message);
-    setC1(''); setC2(''); toast('Tu contraseña quedó actualizada');
+    setC1(''); setC2(''); toast('Tu contraseña quedó actualizada'); setVista('menu');
   };
   const activar = async () => { await bioActivar(perfil.email, perfil.nombre); setBio(true); toast('Listo: la próxima vez entrarás con tu huella'); };
-  return html`<${Modal} title="Mi cuenta" onClose=${onClose}>
-    <div class="me-card"><div class="avatar">${(perfil.nombre || perfil.email).slice(0, 1).toUpperCase()}</div>
-      <div><b>${perfil.nombre || nombreUsuario(perfil.email)}</b><span class="muted">Usuario: ${perfil.usuario || nombreUsuario(perfil.email)} · ${ROLES[perfil.rol]}</span>
-      ${perfil.correo && html`<span class="muted small">Correo de recuperación: ${perfil.correo}</span>`}</div></div>
-    <div class="section-title">Huella o rostro</div>
-    ${!puedeBio ? html`<p class="muted">Este dispositivo no permite entrar con huella o rostro.</p>` : bio ?
-      html`<div class="info"><${Icon} n="finger" size=${16} />Activado: en este dispositivo entras solo con tu huella, sin escribir la contraseña.</div>
-        <button class="btn ghost" onClick=${() => { bioDesactivar(); setBio(false); toast('Huella desactivada'); }}>Desactivar</button>` :
-      html`<p class="muted">Entra con tu huella o tu rostro en lugar de escribir la contraseña.</p>
-        <${AsyncButton} className="btn" icon="finger" onClick=${activar}>Activar en este dispositivo<//>`}
-    <div class="section-title">Cambiar contraseña</div>
-    <${Field} label="Contraseña nueva"><${ClaveInput} value=${c1} onInput=${setC1} autocomplete="new-password" reglas=${!!c1} /><//>
-    <${Field} label="Repítela"><${ClaveInput} value=${c2} onInput=${setC2} autocomplete="new-password" /><//>
-    <${AsyncButton} className="btn primary" icon="check" disabled=${!c1} onClick=${cambiar}>Guardar contraseña<//>
-    <hr class="sep" />
-    ${bio ? html`<button class="btn block" onClick=${() => { onClose(); bloquear(); }}><${Icon} n="lock" size=${16} />Bloquear app</button>
-      <button class="btn danger-ghost block" onClick=${() => salir()}><${Icon} n="logout" size=${16} />Cerrar sesión (pedirá contraseña)</button>` :
-      html`<button class="btn danger-ghost block" onClick=${() => salir()}><${Icon} n="logout" size=${16} />Cerrar sesión</button>`}
+  const item = (icon, t, sub, on, cls = '') => html`<button class=${'menu-item ' + cls} onClick=${on}><span class="mi-ico"><${Icon} n=${icon} size=${18} /></span><span class="mi-txt"><b>${t}</b>${sub && html`<small>${sub}</small>`}</span>${cls !== 'peligro' && html`<${Icon} n="chevron" size=${16} />`}</button>`;
+  const atras = html`<button class="btn ghost sm back-link" onClick=${() => setVista('menu')}><${Icon} n="down2" size=${14} />Volver</button>`;
+  return html`<${Modal} title=${vista === 'menu' ? 'Mi cuenta' : vista === 'clave' ? 'Cambiar contraseña' : 'Huella o rostro'} onClose=${onClose}>
+    ${vista === 'menu' && html`
+      <div class="me-card"><div class="avatar">${nombre.slice(0, 1).toUpperCase()}</div>
+        <div><b>${nombre}</b><span class="muted">@${perfil.usuario || nombreUsuario(perfil.email)} · ${ROLES[perfil.rol]}</span>
+        ${perfil.correo && html`<span class="muted small">Recuperación: ${perfil.correo}</span>`}</div></div>
+      <div class="menu-list">
+        ${item('lock', 'Cambiar contraseña', 'Mínimo 6 caracteres con mayúscula, número y símbolo', () => setVista('clave'))}
+        ${item('finger', 'Huella o rostro', !puedeBio ? 'No disponible en este dispositivo' : bio ? 'Activada en este dispositivo' : 'Entra sin escribir la contraseña', () => setVista('bio'))}
+        ${bio && item('shield', 'Bloquear app', 'La próxima entrada será con tu huella', () => { onClose(); bloquear(); })}
+      </div>
+      <div class="menu-list">${item('logout', 'Cerrar sesión', bio ? 'Pedirá contraseña para volver a entrar' : '', () => salir(), 'peligro')}</div>`}
+    ${vista === 'clave' && html`${atras}
+      <${Field} label="Contraseña nueva"><${ClaveInput} value=${c1} onInput=${setC1} autocomplete="new-password" reglas=${!!c1} /><//>
+      <${Field} label="Repítela"><${ClaveInput} value=${c2} onInput=${setC2} autocomplete="new-password" /><//>
+      <${AsyncButton} className="btn primary block" icon="check" disabled=${!c1} onClick=${cambiar}>Guardar contraseña<//>`}
+    ${vista === 'bio' && html`${atras}
+      ${!puedeBio ? html`<p class="muted">Este dispositivo no permite entrar con huella o rostro.</p>` : bio ?
+        html`<div class="info"><${Icon} n="finger" size=${16} />Activado: en este dispositivo entras solo con tu huella, sin escribir la contraseña.</div>
+          <button class="btn ghost block" onClick=${() => { bioDesactivar(); setBio(false); toast('Huella desactivada'); }}>Desactivar en este dispositivo</button>` :
+        html`<p class="muted">Entra con tu huella o tu rostro en lugar de escribir la contraseña. Solo aplica a este dispositivo.</p>
+          <${AsyncButton} className="btn primary block" icon="finger" onClick=${activar}>Activar en este dispositivo<//>`}`}
   <//>`;
 }
 
@@ -225,10 +237,9 @@ function Shell({ session, perfil }) {
       <nav class="side-nav">${rutas.map((r) => html`<a key=${r.id} href=${'#/' + r.id} class=${'side-link' + (r.id === R.id ? ' on' : '')} aria-current=${r.id === R.id ? 'page' : null}>
         <${Icon} n=${r.icon} size=${19} /><span>${r.label}</span></a>`)}</nav>
       <div class="side-foot">
-        ${perfil.rol === 'dueno' && CONFIG.hojaUrl && html`<a class="side-link" href=${CONFIG.hojaUrl} target="_blank" rel="noopener"><${Icon} n="sheet" size=${19} /><span>Hoja de Google</span></a>`}
         ${instalar && html`<button class="side-link" onClick=${() => { instalar.prompt(); setInstalar(null); }}><${Icon} n="download" size=${19} /><span>Instalar app</span></button>`}
         <button class="me" onClick=${() => setCuenta(true)}><div class="avatar">${nombre.slice(0, 1).toUpperCase()}</div>
-          <div class="me-txt"><b>${nombre}</b><small>Mi cuenta</small></div><${Icon} n="edit" size=${16} /></button>
+          <div class="me-txt"><b>${nombre}</b><small>Mi cuenta</small></div><${Icon} n="settings" size=${16} /></button>
       </div>
     </aside>
 
@@ -258,7 +269,6 @@ function Shell({ session, perfil }) {
       <div class="sheet-menu">
         <div class="sheet-grab"></div>
         <div class="sheet-grid">${extras.map((r) => html`<a key=${r.id} href=${'#/' + r.id} class="sheet-item"><span class="sheet-ico"><${Icon} n=${r.icon} size=${22} /></span>${r.label}</a>`)}</div>
-        ${perfil.rol === 'dueno' && CONFIG.hojaUrl && html`<a class="btn ghost block" href=${CONFIG.hojaUrl} target="_blank" rel="noopener"><${Icon} n="sheet" size=${16} />Abrir hoja de Google</a>`}
         ${instalar && html`<button class="btn ghost block" onClick=${() => { instalar.prompt(); setInstalar(null); }}><${Icon} n="download" size=${16} />Instalar app</button>`}
       </div>
     </div>`}
