@@ -719,3 +719,7 @@ hr.sep { border: 0; border-top: 1px solid var(--line); margin: 4px 0; width: 100
 .paquete .parada { padding: 8px 0; }
 .input.mini { width: auto; padding: 6px 8px; font-size: 13px; border-radius: 9px; }
 @media (max-width: 860px) { .paquetes { grid-template-columns: 1fr; } .input.mini { font-size: 16px; } }
+.ruta-item.destacada { background: var(--amber-soft); }
+.pa-items.mini { margin-top: 6px; }
+.pa-items.mini .chip { padding: 3px 9px; font-size: 12.5px; }
+.pa-items.mini .chip b { font-size: 13px; }
