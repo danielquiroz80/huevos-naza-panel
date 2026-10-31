@@ -1,0 +1,16 @@
+{
+  "name": "Huevos de la Naza · Panel",
+  "short_name": "La Naza",
+  "description": "Pedidos, clientes, inventario y estadísticas de Huevos de la Naza",
+  "lang": "es-CO",
+  "start_url": "./#/inicio",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#FFF9EE",
+  "theme_color": "#F7B016",
+  "icons": [
+    { "src": "assets/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "assets/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "assets/icon-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
