@@ -107,7 +107,7 @@ const estadoRuta = (x) => x.estado === 'en_curso' ? ['En ruta', 'violet'] : x.es
 function Paquetes({ dia, origen, admin, perfil, bloqueado, onListo }) {
   const r = useAsync(async () => {
     if (!dia) return null;
-    const [reps, pedidos, rutas] = await Promise.all([q(sb.rpc('panel_repartidores', { p_fecha: dia })), q(sb.rpc('panel_pedidos_disponibles', { p_fecha: dia })), q(sb.rpc('panel_paquetes', { p_fecha: dia }))]);
+    const [reps, pedidos, rutas] = await Promise.all([admin ? q(sb.rpc('panel_repartidores', { p_fecha: dia })) : Promise.resolve([]), q(sb.rpc('panel_pedidos_disponibles', { p_fecha: dia })), q(sb.rpc('panel_paquetes', { p_fecha: dia }))]);
     return { reps, pedidos: pedidos.filter((p) => !p.repartidor), rutas };
   }, [dia]);
   const [sel, setSel] = useState(null);
@@ -154,7 +154,7 @@ function Paquetes({ dia, origen, admin, perfil, bloqueado, onListo }) {
   return html`<div class="stack">
     <${Card} title=${'Rutas del ' + fechaCorta(dia)} icon="truck" pad=${false}
       action=${admin && rutas.some((x) => x.estado === 'planeada') && html`<button class="btn sm danger-ghost" onClick=${() => setDlg({ t: 'reiniciar' })}><${Icon} n="refresh" size=${14} />Empezar de nuevo</button>`}>
-      ${!rutas.length ? html`<${Empty} icon="truck" title="Aún no hay rutas">${!admin ? 'El Admin aún no ha publicado rutas para este día.' + (pedidos.length ? ' Puedes armar tu propia ruta con los pedidos libres.' : '') : pedidos.length ? 'Elige quiénes salen hoy y sugiere los paquetes.' : 'No hay pedidos por repartir.'}<//>` :
+      ${!rutas.length ? html`<${Empty} icon="truck" title="Aún no hay rutas">${!admin ? 'Aún no hay rutas publicadas para ti este día. Cuando el Admin las publique aparecerán aquí.' : pedidos.length ? 'Elige quiénes salen hoy y sugiere los paquetes.' : 'No hay pedidos por repartir.'}<//>` :
       html`<div class="list">${rutas.map((x) => {
         const [et, tone] = estadoRuta(x), mia = perfil && x.repartidor === perfil.email, sugeridaMia = perfil && x.sugerido_para === perfil.email;
         return html`<div key=${x.id} class=${'row-item static wrap ruta-item' + (sugeridaMia && !x.repartidor ? ' destacada' : '')}>
@@ -1100,18 +1100,18 @@ function TomarPedidos({ perfil, ruta, actuales = [], onListo, onCancelar }) {
     onListo();
   };
 
-  return html`<div class=${'stack ruta-view' + (bloqueado ? '' : ' con-barra')}>
+  return html`<div class=${'stack ruta-view' + (ruta ? ' con-barra' : '')}>
     <section class="ruta-head"><div><span class="hero-kicker">${ruta ? fechaLarga(ruta.fecha) : 'Rutas disponibles'}</span>
-      <h2>${ruta ? 'Pedidos de tu ruta' : 'Toma o arma tu ruta'}</h2><span>${ruta ? 'Elige los pedidos que vas a entregar.' : 'Las rutas que toma otro repartidor dejan de aparecer aquí.'}</span></div></section>
+      <h2>${ruta ? 'Pedidos de tu ruta' : 'Rutas para ti'}</h2><span>${ruta ? 'Elige los pedidos que vas a entregar.' : 'Toma una de las rutas que el Admin publicó para ti.'}</span></div></section>
     ${bloqueado && html`<div class="info"><${Icon} n="route" size=${16} /><span>Ya tienes la ruta R-${mia.data.id} (${mia.data.estado === 'en_curso' ? 'en recorrido' : 'por iniciar'}). Para tomar otra, libérala primero en "Mi ruta".</span></div>`}
     <${ErrorBox} error=${r.error} onRetry=${r.reload} />
-    ${!r.data ? html`<${Loader} rows=${5} />` : !lista.length && !fechas.length ? html`<${Card}><${Empty} icon="check" title="No hay pedidos por entregar">Cuando lleguen pedidos sin repartidor aparecerán aquí.<//>
+    ${!r.data ? html`<${Loader} rows=${5} />` : !lista.length && !fechas.length ? html`<${Card}><${Empty} icon="check" title="No hay pedidos por entregar">Cuando el Admin publique rutas para ti aparecerán aquí.<//>
         <div class="center"><button class="btn" onClick=${r.reload}><${Icon} n="refresh" size=${16} />Revisar de nuevo</button></div><//>` : html`
       ${!ruta && html`<${Field} label="Día de entrega"><select class="input" value=${dia} onChange=${(e) => { setDia(e.target.value); setSel([]); }}>
         ${fechas.map((f) => html`<option value=${f}>${fechaLarga(f)}${f === hoyISO() ? ' (hoy)' : ''}</option>`)}</select><//>`}
       ${!ruta && dia && html`<${Paquetes} key=${dia} dia=${dia} origen=${leerOrigen()} perfil=${perfil} bloqueado=${bloqueado} onListo=${onListo} />
-        ${lista.length > 0 && !bloqueado && html`<div class="section-title">O arma tu ruta eligiendo pedidos libres</div>`}`}
-      ${!bloqueado && html`<${Card} title=${lista.length + ' pedido(s) libres'} icon="pedidos" pad=${false}
+        `}
+      ${ruta && html`<${Card} title=${lista.length + ' pedido(s) libres'} icon="pedidos" pad=${false}
         action=${lista.length > 0 && html`<button class="btn sm ghost" onClick=${() => setSel(sel.length === lista.length ? [] : lista.map((p) => p.id))}>${sel.length === lista.length ? 'Quitar todos' : 'Elegir todos'}</button>`}>
         ${!lista.length ? html`<${Empty} icon="check" title="No hay pedidos libres ese día" />` :
         html`<div class="checklist pad">${lista.map((p) => html`<label key=${p.id} class=${'check-item' + (sel.includes(p.id) ? ' on' : '')}>
@@ -1120,7 +1120,7 @@ function TomarPedidos({ perfil, ruta, actuales = [], onListo, onCancelar }) {
             <span class="ri-meta">${p.cliente} · #${p.id}${(p.items || []).length ? ' · ' + p.items.map((it) => it.cantidad + ' ' + it.producto).join(', ') : ''}</span></span>
           <b>${num(p.canastas)}<small class="muted"> can.</small></b></label>`)}</div>`}
       <//>`}`}
-    ${!bloqueado && html`<div class="entrega-bar">
+    ${ruta && html`<div class="entrega-bar">
       ${onCancelar ? html`<button class="btn ghost" onClick=${onCancelar}>Cancelar</button>` : html`<div class="ab-info dark"><b>${elegidos.length} pedidos</b><span>${num(canastas)}${cap ? ' de ' + cap : ''} canastas</span></div>`}
       <${AsyncButton} className="btn primary" icon="check" disabled=${!r.data || (!ruta && !elegidos.length) || (cap > 0 && canastas > cap)} onClick=${guardar}>
         ${ruta ? 'Guardar (' + elegidos.length + ')' : 'Crear mi ruta (' + elegidos.length + ')'}<//>
