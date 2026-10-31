@@ -709,3 +709,13 @@ hr.sep { border: 0; border-top: 1px solid var(--line); margin: 4px 0; width: 100
 .check-item .ci-txt .dir-main { font-weight: 800; }
 .paso-head .paso-act { margin-left: auto; }
 .ab-info.dark span { color: var(--ink-3); }
+.paquetes { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; margin: 14px 0; }
+.paquete { --c: var(--blue); border: 1.5px solid var(--line); border-top: 5px solid var(--c); border-radius: 18px; padding: 14px; display: grid; gap: 10px; background: var(--paper); align-content: start; }
+.paquete header { display: flex; align-items: center; gap: 10px; }
+.paquete header > div { flex: 1; display: grid; }
+.paquete header span:not(.rep-avatar) { font-size: 13px; color: var(--muted); }
+.paquete .rep-avatar { width: 36px; height: 36px; font-size: 15px; border-radius: 11px; }
+.paquete .link { justify-self: start; }
+.paquete .parada { padding: 8px 0; }
+.input.mini { width: auto; padding: 6px 8px; font-size: 13px; border-radius: 9px; }
+@media (max-width: 860px) { .paquetes { grid-template-columns: 1fr; } .input.mini { font-size: 16px; } }

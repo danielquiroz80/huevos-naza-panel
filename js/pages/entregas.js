@@ -86,55 +86,87 @@ function repartir(pedidos, reps, centro) {
   return grupos;
 }
 
-/** Creación automática de rutas según los repartidores disponibles. */
-function AutoRutas({ dia, data, origen, destino, mismo, onListo }) {
-  const [sel, setSel] = useState(() => data.reps.map((r) => r.email));
-  const [res, setRes] = useState(null);
-  const bloqueadas = new Set(data.rutas.filter((r) => r.estado !== 'planeada').map((r) => r.id));
-  const libres = data.pedidos.filter((p) => ['pendiente', 'confirmado', 'preparando'].includes(p.estado) && !(p.ruta_id && bloqueadas.has(p.ruta_id)));
-  const ocupados = new Set(data.rutas.filter((r) => r.estado !== 'planeada').map((r) => r.repartidor));
-  const disponibles = data.reps.filter((r) => sel.includes(r.email) && !ocupados.has(r.email));
-  const toggle = (e) => setSel(sel.includes(e) ? sel.filter((x) => x !== e) : [...sel, e]);
-  const crear = async () => {
-    if (!disponibles.length) throw new Error('Selecciona al menos un repartidor disponible.');
-    if (!libres.length) throw new Error('No hay pedidos por asignar para este día.');
-    if (!origen.texto && !origen.lat) throw new Error('Escribe el punto de salida o usa tu ubicación.');
-    const grupos = repartir(libres, disponibles, origen);
-    const salida = [];
-    for (let i = 0; i < disponibles.length; i++) {
-      const r = disponibles[i], g = grupos[i];
-      let paradas = g.map((p) => ({ id: p.id, lat: p.lat, lng: p.lng, minutos: null })), info = null;
-      if (g.length > 1) {
-        try {
-          const x = await accion({ accion: 'ruta_optimizar', fecha: dia, ids: g.map((p) => p.id), origen, volver: mismo, destino: mismo ? null : destino });
-          info = x.data; paradas = info.paradas.map((p) => ({ id: p.id, lat: p.lat, lng: p.lng, minutos: p.minutos }));
-        } catch (e) { /* se guarda sin ordenar */ }
-      }
-      const o = info && info.origen && info.origen.lat ? info.origen : origen;
-      const dd = mismo ? o : (info && info.destino) || destino;
-      await q(sb.rpc('panel_guardar_ruta', { p_fecha: dia, p_repartidor: r.email, p_origen_texto: origen.texto || null, p_origen_lat: o.lat || null, p_origen_lng: o.lng || null,
-        p_volver: mismo, p_paradas: paradas, p_distancia_km: info ? info.distancia_km : null, p_duracion_min: info ? info.duracion_min : null,
-        p_destino_texto: mismo ? null : destino.texto || null, p_destino_lat: mismo ? null : dd.lat || null, p_destino_lng: mismo ? null : dd.lng || null }));
-      salida.push({ nombre: r.nombre || r.usuario, paradas: g.length, canastas: sum(g, 'canastas'), cap: r.capacidad_canastas, min: info && info.duracion_min, km: info && info.distancia_km });
-    }
-    localStorage.setItem(ORIGEN_KEY, JSON.stringify(origen));
-    setRes(salida); toast(salida.length + ' ruta(s) creadas y asignadas'); onListo();
+const totales = (ps) => { const m = new Map(); for (const p of ps) for (const it of p.items || []) m.set(it.producto, (m.get(it.producto) || 0) + (Number(it.cantidad) || 0)); return [...m.entries()].sort(); };
+
+/** Elegir quiénes reparten y dividir los pedidos en paquetes equilibrados (uno por repartidor). */
+function Paquetes({ dia, origen, admin, perfil, onListo }) {
+  const r = useAsync(async () => {
+    if (!dia) return null;
+    const [reps, pedidos] = await Promise.all([q(sb.rpc('panel_repartidores', { p_fecha: dia })), q(sb.rpc('panel_pedidos_disponibles', { p_fecha: dia }))]);
+    return { reps, pedidos };
+  }, [dia]);
+  const [sel, setSel] = useState(null);
+  const [plan, setPlan] = useState(null);
+  const [abierto, setAbierto] = useState(null);
+  useEffect(() => { if (r.data) setSel(r.data.reps.filter((x) => !x.ruta_estado || x.ruta_estado === 'planeada').map((x) => x.email)); setPlan(null); }, [r.data]);
+  if (!dia) return null;
+  if (r.error) return html`<${ErrorBox} error=${r.error} onRetry=${r.reload} />`;
+  if (!r.data || !sel) return html`<${Card}><${Loader} rows=${3} /><//>`;
+  const { reps, pedidos } = r.data;
+  const libres = reps.filter((x) => !x.ruta_estado || x.ruta_estado === 'planeada');
+  const elegidos = libres.filter((x) => sel.includes(x.email));
+  const nombre = (x) => x.nombre || x.usuario;
+  const toggle = (e) => { setPlan(null); setSel(sel.includes(e) ? sel.filter((x) => x !== e) : [...sel, e]); };
+  const sugerir = () => {
+    if (!elegidos.length) return toast('Elige al menos un repartidor', 'error');
+    const grupos = elegidos.length === 1 ? [pedidos.slice()] : repartir(pedidos, elegidos, origen);
+    setPlan(elegidos.map((x, i) => ({ rep: x, ids: grupos[i].map((p) => p.id) }))); setAbierto(null);
   };
-  return html`<${Card} title="Crear rutas automáticamente" icon="spark">
-    <p class="muted small">Marca quiénes salen a repartir. La app divide los ${libres.length} pedidos por zonas y según la capacidad de cada uno, y ordena cada ruta.</p>
-    <div class="rep-chips">${data.reps.map((r) => {
-      const ocu = ocupados.has(r.email), on = sel.includes(r.email) && !ocu;
-      return html`<button key=${r.email} class=${'rep-chip' + (on ? ' on' : '')} disabled=${ocu} onClick=${() => toggle(r.email)}>
+  const mover = (id, de, a) => setPlan(plan.map((g, i) => i === de ? { ...g, ids: g.ids.filter((x) => x !== id) } : i === a ? { ...g, ids: [...g.ids, id] } : g));
+  const asignar = async () => {
+    const paquetes = plan.filter((g) => g.ids.length).map((g) => ({ repartidor: g.rep.email, ids: g.ids }));
+    if (!paquetes.length) throw new Error('No hay pedidos para asignar.');
+    await q(sb.rpc('panel_repartir', { p_fecha: dia, p_paquetes: paquetes, p_origen_texto: origen && origen.texto || null, p_origen_lat: origen && origen.lat || null, p_origen_lng: origen && origen.lng || null }));
+    if (admin && origen && (origen.texto || origen.lat)) {
+      // El Admin además deja cada ruta ordenada; el repartidor lo hace desde su celular.
+      for (const g of plan.filter((x) => x.ids.length > 1)) {
+        try {
+          const x = await accion({ accion: 'ruta_optimizar', fecha: dia, ids: g.ids, origen, volver: true });
+          const d = x.data, o = d.origen && d.origen.lat ? { ...origen, ...d.origen, texto: origen.texto } : origen;
+          await q(sb.rpc('panel_guardar_ruta', { p_fecha: dia, p_repartidor: g.rep.email, p_origen_texto: origen.texto || null, p_origen_lat: o.lat || null, p_origen_lng: o.lng || null,
+            p_volver: true, p_paradas: d.paradas.map((p) => ({ id: p.id, lat: p.lat, lng: p.lng, minutos: p.minutos })), p_distancia_km: d.distancia_km, p_duracion_min: d.duracion_min }));
+        } catch (e) { /* queda asignada sin ordenar */ }
+      }
+    }
+    toast(paquetes.length === 1 ? 'Todos los pedidos quedaron en la ruta de ' + nombre(plan.find((g) => g.ids.length).rep) : paquetes.length + ' rutas creadas con paquetes equilibrados');
+    setPlan(null); onListo && onListo();
+  };
+  const porId = new Map(pedidos.map((p) => [p.id, p]));
+  const total = sum(pedidos, 'canastas');
+
+  return html`<${Card} title="Repartir pedidos del día" icon="users">
+    <p class="muted small">${pedidos.length} pedidos · ${num(total)} canastas por repartir. Elige quiénes salen hoy:</p>
+    <div class="rep-chips">${reps.map((x) => {
+      const ocu = x.ruta_estado && x.ruta_estado !== 'planeada', on = sel.includes(x.email) && !ocu;
+      return html`<button key=${x.email} class=${'rep-chip' + (on ? ' on' : '')} disabled=${ocu} onClick=${() => toggle(x.email)}>
         <span class="rc-check"><${Icon} n=${on ? 'check' : 'plus'} size=${14} /></span>
-        <span><b>${r.nombre || r.usuario}</b><small>${ocu ? 'Ya está en recorrido' : r.capacidad_canastas ? 'Hasta ' + r.capacidad_canastas + ' canastas' : 'Sin capacidad definida'}</small></span></button>`;
+        <span><b>${nombre(x)}${perfil && x.email === perfil.email ? ' (tú)' : ''}</b><small>${ocu ? 'Ya está en recorrido' : x.capacidad_canastas ? 'Hasta ' + x.capacidad_canastas + ' canastas' : 'Sin capacidad definida'}</small></span></button>`;
     })}</div>
-    ${!data.reps.length && html`<p class="warn">No hay repartidores activos. Créalos en Administración → Equipo.</p>`}
+    ${!reps.length && html`<p class="warn">No hay repartidores activos.</p>`}
     <div class="auto-pie">
-      <span><b>${disponibles.length}</b> repartidor(es) disponibles · <b>${num(sum(libres, 'canastas'))}</b> canastas</span>
-      <${AsyncButton} className="btn violet" icon="spark" disabled=${!disponibles.length || !libres.length} onClick=${crear}>Crear ${disponibles.length || ''} ruta(s)<//>
+      <span>${elegidos.length === 0 ? 'Ningún repartidor elegido' : elegidos.length === 1 ? html`<b>1 repartidor</b>: lleva todos los pedidos` : html`<b>${elegidos.length} repartidores</b>: paquetes equilibrados por zona y capacidad`}</span>
+      <button class="btn violet" disabled=${!elegidos.length || !pedidos.length} onClick=${sugerir}><${Icon} n="spark" size=${16} />${plan ? 'Volver a sugerir' : 'Sugerir paquetes'}</button>
     </div>
-    ${res && html`<div class="auto-res">${res.map((x) => html`<div key=${x.nombre}><b>${x.nombre}</b><span>${x.paradas} paradas · ${num(x.canastas)} can.${x.min ? ' · ' + x.min + ' min' : ''}${x.km ? ' · ' + num(x.km) + ' km' : ''}</span>
-      ${x.cap && x.canastas > x.cap ? html`<span class="neg small">Supera su capacidad (${x.cap})</span>` : null}</div>`)}</div>`}
+    ${plan && html`<div class="paquetes">${plan.map((g, i) => {
+      const ps = g.ids.map((id) => porId.get(id)).filter(Boolean), can = sum(ps, 'canastas'), cap = Number(g.rep.capacidad_canastas) || 0;
+      const barrios = [...new Set(ps.map((p) => p.barrio || p.municipio).filter(Boolean))];
+      return html`<section key=${g.rep.email} class="paquete" style=${{ '--c': COLORES_RUTA[i % COLORES_RUTA.length] }}>
+        <header><span class="rep-avatar">${nombre(g.rep).slice(0, 1).toUpperCase()}</span>
+          <div><b>${nombre(g.rep)}</b><span>${ps.length} pedidos · ${num(can)} canastas${cap ? ' de ' + cap : ''}</span></div>
+          ${cap && can > cap ? html`<${Badge} tone="red">Supera capacidad<//>` : null}</header>
+        <div class="rep-prog"><div style=${{ width: (total ? Math.round((can / total) * 100) : 0) + '%' }}></div></div>
+        <div class="pa-items">${totales(ps).map(([k, v]) => html`<span key=${k} class="chip"><b>${num(v)}</b> ${k}</span>`)}</div>
+        ${barrios.length > 0 && html`<p class="muted small">Zonas: ${barrios.slice(0, 5).join(', ')}${barrios.length > 5 ? '…' : ''}</p>`}
+        <button class="link" onClick=${() => setAbierto(abierto === i ? null : i)}>${abierto === i ? 'Ocultar pedidos' : 'Ver o mover pedidos'}</button>
+        ${abierto === i && html`<ol class="paradas compacta">${ps.map((p) => html`<li key=${p.id} class="parada">
+          <div class="ri-main"><b class="dir-main">${p.direccion_entrega}</b><span class="ri-meta">${[p.barrio, p.municipio].filter(Boolean).join(' · ')} · ${num(p.canastas)} can.</span></div>
+          ${plan.length > 1 && html`<select class="input mini" value="" onChange=${(e) => e.target.value !== '' && mover(p.id, i, Number(e.target.value))} aria-label="Pasar a otro repartidor">
+            <option value="">Pasar a…</option>${plan.map((o, k) => k !== i && html`<option value=${k}>${nombre(o.rep)}</option>`)}</select>`}
+        </li>`)}</ol>`}
+      </section>`;
+    })}</div>
+    <${AsyncButton} className="btn primary big block" icon="check" onClick=${asignar}>${plan.length === 1 ? 'Asignar todo a ' + nombre(plan[0].rep) : 'Asignar ' + plan.length + ' paquetes'}<//>
+    <p class="muted small center">Cada repartidor verá su paquete en "Mi ruta", confirmará su carga y ordenará su ruta.</p>`}
   <//>`;
 }
 
@@ -330,7 +362,7 @@ function Planear({ onVer }) {
     </div>
     <${ErrorBox} error=${d.error} onRetry=${d.reload} />
     ${!d.data || lista === null ? html`<${Loader} rows=${5} />` : html`
-    <${AutoRutas} key=${dia} dia=${dia} data=${d.data} origen=${origen} destino=${destino} mismo=${volver} onListo=${() => { setRep(null); d.reload(); }} />
+    <${Paquetes} key=${dia} dia=${dia} origen=${origen} admin=${true} onListo=${() => { setRep(null); d.reload(); }} />
     <div class="section-title">Revisar o ajustar una ruta</div>
     <div class="grid-2 planner">
       <div class="stack">
@@ -607,12 +639,12 @@ function PrepararRuta({ ruta, pendientes, gestor, onCambio, onPedidos }) {
 
 /** El repartidor elige los pedidos disponibles para crear o ajustar su propia ruta. */
 function TomarPedidos({ perfil, ruta, actuales = [], onListo, onCancelar }) {
-  const r = useAsync(() => q(sb.rpc('panel_pedidos_disponibles')), []);
+  const r = useAsync(() => q(sb.rpc('panel_pedidos_disponibles', { p_fecha: null })), []);
   const fechas = r.data ? [...new Set(r.data.map((p) => p.fecha_entrega).concat(ruta ? [ruta.fecha] : []))].sort() : [];
   const [dia, setDia] = useState(ruta ? ruta.fecha : '');
   useEffect(() => { if (!dia && fechas.length) setDia(fechas.includes(hoyISO()) ? hoyISO() : fechas[0]); }, [r.data]);
   const [sel, setSel] = useState(() => actuales.map((p) => p.id));
-  const lista = actuales.concat((r.data || []).filter((p) => p.fecha_entrega === dia && !actuales.some((a) => a.id === p.id)));
+  const lista = actuales.concat((r.data || []).filter((p) => p.fecha_entrega === dia && !p.repartidor && !actuales.some((a) => a.id === p.id)));
   const elegidos = lista.filter((p) => sel.includes(p.id));
   const canastas = sum(elegidos, 'canastas'), cap = Number(perfil.capacidad_canastas) || 0;
   const toggle = (id) => setSel(sel.includes(id) ? sel.filter((x) => x !== id) : [...sel, id]);
@@ -636,6 +668,8 @@ function TomarPedidos({ perfil, ruta, actuales = [], onListo, onCancelar }) {
         <div class="center"><button class="btn" onClick=${r.reload}><${Icon} n="refresh" size=${16} />Revisar de nuevo</button></div><//>` : html`
       ${!ruta && html`<${Field} label="Día de entrega"><select class="input" value=${dia} onChange=${(e) => { setDia(e.target.value); setSel([]); }}>
         ${fechas.map((f) => html`<option value=${f}>${fechaLarga(f)}${f === hoyISO() ? ' (hoy)' : ''}</option>`)}</select><//>`}
+      ${!ruta && dia && html`<${Paquetes} key=${dia} dia=${dia} origen=${leerOrigen()} perfil=${perfil} onListo=${onListo} />
+        <div class="section-title">O elige tus pedidos a mano</div>`}
       <${Card} title=${lista.length + ' pedido(s)'} icon="pedidos" pad=${false}
         action=${lista.length > 0 && html`<button class="btn sm ghost" onClick=${() => setSel(sel.length === lista.length ? [] : lista.map((p) => p.id))}>${sel.length === lista.length ? 'Quitar todos' : 'Elegir todos'}</button>`}>
         ${!lista.length ? html`<${Empty} icon="check" title="No hay pedidos libres ese día" />` :

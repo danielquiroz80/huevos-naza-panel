@@ -1,6 +1,6 @@
 // Service worker mínimo: guarda la "cáscara" de la app para que abra rápido e instalable.
 // Los datos siempre se piden en vivo a Supabase (nunca se guardan en caché).
-const CACHE = 'naza-panel-v7';
+const CACHE = 'naza-panel-v8';
 const SHELL = ['./', 'index.html', 'styles.css', 'config.js', 'js/app.js', 'js/lib.js', 'js/ui.js', 'js/bio.js', 'js/mapa.js',
   'assets/logo.png', 'assets/icon-192.png', 'manifest.webmanifest'];
 
