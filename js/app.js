@@ -1,7 +1,7 @@
 import { render } from 'https://esm.sh/htm@3.1.1/preact/standalone';
 import { html, useState, useEffect, Icon, Toaster, toast, AsyncButton, Field, Modal } from './ui.js';
 import { sb, q, CONFIG, ROLES, nombreUsuario, claveInvalida, REGLAS_CLAVE, DOMINIO_USUARIOS, dispositivo, registrarEvento, salir } from './lib.js';
-import { bioDisponible, bioConfig, bioActivar, bioVerificar, bioDesactivar, desbloqueado } from './bio.js';
+import { bioDisponible, bioConfig, bioActivar, bioVerificar, bioDesactivar, desbloqueado, bloquear } from './bio.js';
 import { Inicio } from './pages/inicio.js';
 import { Pedidos } from './pages/pedidos.js';
 import { Clientes } from './pages/clientes.js';
@@ -51,13 +51,14 @@ function Login() {
     const u = usuario.trim().toLowerCase();
     if (!u || !clave) throw new Error('Escribe tu usuario y tu contraseña.');
     const email = u.includes('@') ? u : await q(sb.rpc('email_para_login', { p_usuario: u }));
+    sessionStorage.setItem('naza_desbloqueado', '1'); // la contraseña ya cuenta como desbloqueo: no pedir huella después
     const { error } = email ? await sb.auth.signInWithPassword({ email, password: clave }) : { error: { message: 'invalid' } };
     if (error) {
+      sessionStorage.removeItem('naza_desbloqueado');
       sb.rpc('panel_ingreso_fallido', { p_usuario: u, p_evento: 'fallido', p_dispositivo: dispositivo() }).then(() => {}, () => {});
       throw new Error(/banned/i.test(error.message) ? 'Tu usuario está desactivado. Habla con el administrador.' : /rate|many/i.test(error.message) ? 'Hiciste muchos intentos. Espera un momento y vuelve a intentarlo.' : 'El usuario o la contraseña no coinciden.');
     }
     localStorage.setItem('naza_usuario', u);
-    sessionStorage.setItem('naza_desbloqueado', '1');
     registrarEvento('ingreso');
   };
   const recuperar = async () => {
@@ -131,14 +132,19 @@ function NuevaClave({ onListo }) {
 }
 
 function Bloqueo({ perfil, conf, onOk }) {
-  const intentar = async () => { await bioVerificar(conf); registrarEvento('desbloqueo'); onOk(); };
-  useEffect(() => { intentar().catch(() => {}); }, []);
-  return html`<div class="login"><div class="login-card center">
-    <img src="assets/logo.png" alt="" width="76" height="76" class="round" />
-    <h2>Hola, ${(perfil.nombre || '').split(' ')[0] || perfil.usuario || nombreUsuario(perfil.email)}</h2>
-    <p class="muted">Usa tu huella o tu rostro para abrir la app.</p>
-    <${AsyncButton} className="btn primary block" icon="shield" onClick=${intentar}>Desbloquear<//>
-    <button class="btn ghost block" onClick=${() => { bioDesactivar(); salir(); }}>Entrar con contraseña</button>
+  const [auto, setAuto] = useState(true);
+  const intentar = async () => {
+    try { await bioVerificar(conf); } catch (e) { throw new Error('No pudimos leer tu huella. Toca "Entrar con huella" para intentarlo de nuevo.'); }
+    registrarEvento('desbloqueo'); onOk();
+  };
+  useEffect(() => { if (auto) { setAuto(false); intentar().catch(() => {}); } }, []);
+  const nombre = (perfil.nombre || '').split(' ')[0] || perfil.usuario || nombreUsuario(perfil.email);
+  return html`<div class="login lock"><div class="login-card center">
+    <img src="assets/logo.png" alt="" width="84" height="84" class="round" />
+    <h2>Hola, ${nombre}</h2>
+    <p class="muted">Usa tu huella o tu rostro para entrar.</p>
+    <${AsyncButton} className="finger-btn" onClick=${intentar}><span class="finger-ico"><${Icon} n="finger" size=${42} /></span><span>Entrar con huella</span><//>
+    <button class="btn ghost block" onClick=${() => salir()}><${Icon} n="lock" size=${16} />Entrar con contraseña u otra cuenta</button>
   </div></div>`;
 }
 
@@ -172,16 +178,18 @@ function MiCuenta({ perfil, onClose }) {
       ${perfil.correo && html`<span class="muted small">Correo de recuperación: ${perfil.correo}</span>`}</div></div>
     <div class="section-title">Huella o rostro</div>
     ${!puedeBio ? html`<p class="muted">Este dispositivo no permite entrar con huella o rostro.</p>` : bio ?
-      html`<div class="info"><${Icon} n="shield" size=${16} />Activado en este dispositivo: la app te pedirá tu huella al abrirse.</div>
+      html`<div class="info"><${Icon} n="finger" size=${16} />Activado: en este dispositivo entras solo con tu huella, sin escribir la contraseña.</div>
         <button class="btn ghost" onClick=${() => { bioDesactivar(); setBio(false); toast('Huella desactivada'); }}>Desactivar</button>` :
-      html`<p class="muted">Abre la app con tu huella o tu rostro en lugar de escribir la contraseña.</p>
-        <${AsyncButton} className="btn" icon="shield" onClick=${activar}>Activar en este dispositivo<//>`}
+      html`<p class="muted">Entra con tu huella o tu rostro en lugar de escribir la contraseña.</p>
+        <${AsyncButton} className="btn" icon="finger" onClick=${activar}>Activar en este dispositivo<//>`}
     <div class="section-title">Cambiar contraseña</div>
     <${Field} label="Contraseña nueva"><${ClaveInput} value=${c1} onInput=${setC1} autocomplete="new-password" reglas=${!!c1} /><//>
     <${Field} label="Repítela"><${ClaveInput} value=${c2} onInput=${setC2} autocomplete="new-password" /><//>
     <${AsyncButton} className="btn primary" icon="check" disabled=${!c1} onClick=${cambiar}>Guardar contraseña<//>
     <hr class="sep" />
-    <button class="btn danger-ghost block" onClick=${() => salir()}><${Icon} n="logout" size=${16} />Cerrar sesión</button>
+    ${bio ? html`<button class="btn block" onClick=${() => { onClose(); bloquear(); }}><${Icon} n="lock" size=${16} />Bloquear app</button>
+      <button class="btn danger-ghost block" onClick=${() => salir()}><${Icon} n="logout" size=${16} />Cerrar sesión (pedirá contraseña)</button>` :
+      html`<button class="btn danger-ghost block" onClick=${() => salir()}><${Icon} n="logout" size=${16} />Cerrar sesión</button>`}
   <//>`;
 }
 
@@ -194,6 +202,9 @@ function Shell({ session, perfil }) {
   const [cuenta, setCuenta] = useState(false);
   const [instalar, setInstalar] = useState(null);
   const [tick, setTick] = useState(0);
+  const [oferta, setOferta] = useState(false);
+  useEffect(() => { if (!bioConfig(perfil.email) && !localStorage.getItem('naza_bio_ofrecido')) bioDisponible().then(setOferta); }, []);
+  const cerrarOferta = () => { localStorage.setItem('naza_bio_ofrecido', '1'); setOferta(false); };
 
   useEffect(() => {
     const f = () => { setRuta(rutaActual(rutas)); setMas(false); window.scrollTo({ top: 0 }); };
@@ -227,9 +238,12 @@ function Shell({ session, perfil }) {
         <h1 class="page-title">${R.label}</h1>
         <div class="topbar-actions">
           <button class="icon-btn" title="Actualizar" aria-label="Actualizar datos" onClick=${() => { setTick((t) => t + 1); toast('Datos actualizados'); }}><${Icon} n="refresh" /></button>
-          <button class="icon-btn only-mobile" title="Mi cuenta" aria-label="Mi cuenta" onClick=${() => setCuenta(true)}><${Icon} n="users" /></button>
+          <button class="avatar-btn only-mobile" title="Mi cuenta" aria-label="Mi cuenta" onClick=${() => setCuenta(true)}><span class="avatar sm">${nombre.slice(0, 1).toUpperCase()}</span></button>
         </div>
       </header>
+      ${oferta && html`<div class="oferta-bio"><${Icon} n="finger" size=${22} /><div><b>Entra más rápido</b><span>Activa tu huella y no tendrás que escribir la contraseña.</span></div>
+        <${AsyncButton} className="btn sm primary" onClick=${async () => { await bioActivar(perfil.email, perfil.nombre); cerrarOferta(); toast('Listo: la próxima vez entras con tu huella'); }}>Activar<//>
+        <button class="icon-btn" aria-label="Ahora no" onClick=${cerrarOferta}><${Icon} n="x" size=${16} /></button></div>`}
       <div class="page" key=${R.id + tick}>
         <${Page} perfil=${perfil} session=${session} />
       </div>
@@ -279,7 +293,16 @@ function App() {
       if (ev === 'SIGNED_IN') { if (desbloqueado()) setAbierto(true); evaluar(session); }
       if (ev === 'SIGNED_OUT') evaluar(null);
     });
-    return () => sub.subscription.unsubscribe();
+    // Bloqueo manual y automático (más de 5 minutos en segundo plano) cuando la huella está activa.
+    const lock = () => setAbierto(false);
+    let oculto = 0;
+    const vis = () => {
+      if (document.hidden) oculto = Date.now();
+      else if (oculto && Date.now() - oculto > 5 * 60000 && localStorage.getItem('naza_bio')) bloquear();
+    };
+    window.addEventListener('naza-bloquear', lock);
+    document.addEventListener('visibilitychange', vis);
+    return () => { sub.subscription.unsubscribe(); window.removeEventListener('naza-bloquear', lock); document.removeEventListener('visibilitychange', vis); };
   }, []);
 
   if (estado.cargando) return html`<div class="boot"><img src="assets/logo.png" alt="" width="88" height="88" /><span>Cargando…</span></div>`;
