@@ -880,7 +880,7 @@ function RutaActiva({ perfil, rutaId, onDisponibles }) {
   if (r.error && !r.data) return html`<${ErrorBox} error=${r.error} onRetry=${r.reload} />`;
   const { ruta, paradas } = r.data;
   if (!ruta && gestor) return html`<${Card}><${Empty} icon="truck" title="No encontramos la ruta">Puede que se haya eliminado.<//><//>`;
-  if (!ruta) return html`<${Card}><${Empty} icon="route" title="No tienes una ruta activa">Toma una de las rutas disponibles o arma la tuya con pedidos libres.<//>
+  if (!ruta) return html`<${Card}><${Empty} icon="route" title="No tienes una ruta activa">Toma una de las rutas que el Admin publicó para ti.<//>
     <div class="center"><button class="btn primary" onClick=${onDisponibles}><${Icon} n="truck" size=${16} />Ver rutas disponibles</button></div><//>`;
   if (!gestor && editarPedidos) return html`<${TomarPedidos} perfil=${perfil} ruta=${ruta} actuales=${paradas.filter((p) => ABIERTA.includes(p.estado))}
     onListo=${() => { setEditarPedidos(false); r.reload(); }} onCancelar=${() => setEditarPedidos(false)} />`;
