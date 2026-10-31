@@ -1,6 +1,6 @@
 import { render } from 'https://esm.sh/htm@3.1.1/preact/standalone';
 import { html, useState, useEffect, Icon, Toaster, toast, AsyncButton, Field, Modal } from './ui.js';
-import { sb, q, CONFIG, ROLES, usuarioAEmail, nombreUsuario } from './lib.js';
+import { sb, q, CONFIG, ROLES, nombreUsuario, claveInvalida, REGLAS_CLAVE, DOMINIO_USUARIOS, dispositivo, registrarEvento, salir } from './lib.js';
 import { bioDisponible, bioConfig, bioActivar, bioVerificar, bioDesactivar, desbloqueado } from './bio.js';
 import { Inicio } from './pages/inicio.js';
 import { Pedidos } from './pages/pedidos.js';
@@ -22,7 +22,7 @@ const TODAS = [
   { id: 'compras', label: 'Compras', icon: 'cart', C: Compras, roles: ['dueno'] },
   { id: 'estadisticas', label: 'Estadísticas', icon: 'chart', C: Estadisticas, roles: ['dueno'] },
   { id: 'planeacion', label: 'Planeación', icon: 'calendar', C: Planeacion, roles: ['dueno'] },
-  { id: 'negocio', label: 'Negocio', icon: 'store', C: Negocio, roles: ['dueno'] }
+  { id: 'negocio', label: 'Administración', icon: 'store', C: Negocio, roles: ['dueno'] }
 ];
 const MOVIL = { dueno: ['inicio', 'pedidos', 'entregas', 'productos'], operador: ['pedidos', 'entregas'], repartidor: ['ruta'] };
 
@@ -32,27 +32,45 @@ function rutaActual(rutas) {
 }
 
 /* ---------- Inicio de sesión ---------- */
+function ClaveInput({ value, onInput, onKeyDown, autocomplete = 'current-password', reglas }) {
+  const [ver, setVer] = useState(false);
+  return html`<div>
+    <div class="pass"><input class="input" type=${ver ? 'text' : 'password'} autocomplete=${autocomplete} value=${value} onInput=${(e) => onInput(e.target.value)} onKeyDown=${onKeyDown} />
+      <button type="button" class="pass-ver" aria-label=${ver ? 'Ocultar contraseña' : 'Mostrar contraseña'} onClick=${() => setVer(!ver)}>${ver ? 'Ocultar' : 'Ver'}</button></div>
+    ${reglas && html`<ul class="reglas">${REGLAS_CLAVE.map((r) => html`<li key=${r.t} class=${r.f(value) ? 'ok' : ''}><${Icon} n=${r.f(value) ? 'check' : 'x'} size=${13} />${r.t}</li>`)}</ul>`}
+  </div>`;
+}
+
 function Login() {
-  const [modo, setModo] = useState('clave');
+  const [modo, setModo] = useState('entrar');
   const [usuario, setUsuario] = useState(localStorage.getItem('naza_usuario') || '');
   const [clave, setClave] = useState('');
-  const [ver, setVer] = useState(false);
-  const [email, setEmail] = useState('');
-  const [enviado, setEnviado] = useState(false);
+  const [enviado, setEnviado] = useState('');
 
   const entrar = async () => {
-    if (!usuario.trim() || !clave) throw new Error('Escribe tu usuario y contraseña.');
-    const { error } = await sb.auth.signInWithPassword({ email: usuarioAEmail(usuario), password: clave });
-    if (error) throw new Error(/invalid|credentials/i.test(error.message) ? 'Usuario o contraseña incorrectos.' : /banned/i.test(error.message) ? 'Este usuario está desactivado.' : error.message);
-    localStorage.setItem('naza_usuario', usuario.trim().toLowerCase());
+    const u = usuario.trim().toLowerCase();
+    if (!u || !clave) throw new Error('Escribe tu usuario y tu contraseña.');
+    const email = u.includes('@') ? u : await q(sb.rpc('email_para_login', { p_usuario: u }));
+    const { error } = email ? await sb.auth.signInWithPassword({ email, password: clave }) : { error: { message: 'invalid' } };
+    if (error) {
+      sb.rpc('panel_ingreso_fallido', { p_usuario: u, p_evento: 'fallido', p_dispositivo: dispositivo() }).then(() => {}, () => {});
+      throw new Error(/banned/i.test(error.message) ? 'Tu usuario está desactivado. Habla con el administrador.' : /rate|many/i.test(error.message) ? 'Hiciste muchos intentos. Espera un momento y vuelve a intentarlo.' : 'El usuario o la contraseña no coinciden.');
+    }
+    localStorage.setItem('naza_usuario', u);
     sessionStorage.setItem('naza_desbloqueado', '1');
+    registrarEvento('ingreso');
   };
-  const enviarEnlace = async () => {
-    const e = email.trim().toLowerCase();
-    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) throw new Error('Escribe un correo válido.');
-    const { error } = await sb.auth.signInWithOtp({ email: e, options: { emailRedirectTo: location.origin + location.pathname, shouldCreateUser: true } });
-    if (error) throw new Error(/rate|seconds/i.test(error.message) ? 'Espera un momento antes de pedir otro enlace.' : /not found|signups/i.test(error.message) ? 'Ese correo no tiene acceso.' : error.message);
-    setEnviado(true);
+  const recuperar = async () => {
+    const u = usuario.trim().toLowerCase();
+    if (!u) throw new Error('Escribe tu usuario o tu correo.');
+    const email = u.includes('@') ? u : await q(sb.rpc('email_para_login', { p_usuario: u }));
+    sb.rpc('panel_ingreso_fallido', { p_usuario: u, p_evento: 'recuperacion', p_dispositivo: dispositivo() }).then(() => {}, () => {});
+    if (!email) throw new Error('No encontramos ese usuario. Revisa cómo lo escribiste.');
+    if (email.endsWith('@' + DOMINIO_USUARIOS)) throw new Error('Tu usuario no tiene un correo registrado. Pídele al administrador que te asigne una contraseña nueva.');
+    const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname });
+    if (error) throw new Error(/rate|seconds|429/i.test(error.message) ? 'Ya enviamos varios correos hace poco. Espera unos minutos e inténtalo de nuevo, o pídele al administrador una contraseña nueva.' : error.message);
+    const [a, d] = email.split('@');
+    setEnviado(a.slice(0, 2) + '•••@' + d);
   };
   const enter = (e) => { if (e.key === 'Enter') document.querySelector('#btn-login button')?.click(); };
 
@@ -61,57 +79,75 @@ function Login() {
       <div class="login-blob"></div>
       <img src="assets/logo.png" alt="Huevos de la Naza" class="login-logo" />
       <h1>${CONFIG.negocio}</h1>
-      <p>Pedidos, entregas, clientes e inventario en un solo lugar.</p>
+      <p>Pedidos, entregas, clientes e inventario, todo en un solo lugar.</p>
     </div>
     <div class="login-card">
-      ${modo === 'clave' ? html`
-        <h2>Entrar</h2>
-        <${Field} label="Usuario" hint="El dueño también puede escribir su correo.">
-          <input class="input" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="tu usuario" value=${usuario}
+      ${modo === 'entrar' ? html`
+        <h2>¡Hola de nuevo!</h2>
+        <p class="muted">Entra con tu usuario y tu contraseña.</p>
+        <${Field} label="Usuario">
+          <input class="input" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="Ej.: daniel" value=${usuario}
             onInput=${(e) => setUsuario(e.target.value)} onKeyDown=${enter} />
         <//>
-        <${Field} label="Contraseña">
-          <div class="pass"><input class="input" type=${ver ? 'text' : 'password'} autocomplete="current-password" value=${clave}
-            onInput=${(e) => setClave(e.target.value)} onKeyDown=${enter} />
-            <button type="button" class="icon-btn" aria-label=${ver ? 'Ocultar' : 'Mostrar'} onClick=${() => setVer(!ver)}><${Icon} n=${ver ? 'x' : 'search'} size=${16} /></button></div>
-        <//>
+        <${Field} label="Contraseña"><${ClaveInput} value=${clave} onInput=${setClave} onKeyDown=${enter} /><//>
         <div id="btn-login"><${AsyncButton} className="btn primary block" icon="check" onClick=${entrar}>Entrar<//></div>
-        <button class="link center-link" onClick=${() => setModo('enlace')}>¿Eres el dueño y no tienes contraseña? Entra con tu correo</button>
+        <button class="link center-link" onClick=${() => { setModo('recuperar'); setEnviado(''); }}>¿Olvidaste tu contraseña?</button>
       ` : !enviado ? html`
-        <h2>Entrar con tu correo</h2>
-        <p class="muted">Te enviamos un enlace de acceso. Luego crea tu contraseña en "Mi cuenta".</p>
-        <${Field} label="Correo"><input class="input" type="email" autocomplete="email" value=${email} onInput=${(e) => setEmail(e.target.value)} /><//>
-        <${AsyncButton} className="btn primary block" icon="mail" onClick=${enviarEnlace}>Enviarme el enlace<//>
-        <button class="btn ghost block" onClick=${() => setModo('clave')}>Volver</button>
+        <h2>Recupera tu contraseña</h2>
+        <p class="muted">Escribe tu usuario y te enviaremos un enlace a tu correo para crear una contraseña nueva.</p>
+        <${Field} label="Usuario o correo"><input class="input" autocapitalize="none" value=${usuario} onInput=${(e) => setUsuario(e.target.value)} /><//>
+        <${AsyncButton} className="btn primary block" icon="mail" onClick=${recuperar}>Enviar enlace<//>
+        <button class="btn ghost block" onClick=${() => setModo('entrar')}>Volver</button>
       ` : html`
         <div class="sent-ico"><${Icon} n="mail" size=${28} /></div>
         <h2>Revisa tu correo</h2>
-        <p class="muted">Abre el enlace que enviamos a <b>${email}</b> en este mismo dispositivo.</p>
-        <button class="btn ghost block" onClick=${() => { setEnviado(false); setModo('clave'); }}>Volver</button>
+        <p class="muted">Enviamos un enlace a <b>${enviado}</b>. Ábrelo en este mismo dispositivo para crear tu contraseña nueva. Si no lo ves, revisa la carpeta de spam.</p>
+        <button class="btn ghost block" onClick=${() => setModo('entrar')}>Volver a entrar</button>
       `}
-      <p class="login-foot"><${Icon} n="shield" size=${14} /> Solo entran las personas que el dueño autoriza.</p>
+      <p class="login-foot"><${Icon} n="shield" size=${14} /> Solo pueden entrar las personas que autoriza el administrador.</p>
     </div>
   </div>`;
 }
 
+function NuevaClave({ onListo }) {
+  const [c1, setC1] = useState('');
+  const [c2, setC2] = useState('');
+  const guardar = async () => {
+    const err = claveInvalida(c1); if (err) throw new Error(err);
+    if (c1 !== c2) throw new Error('Las dos contraseñas no coinciden.');
+    const { error } = await sb.auth.updateUser({ password: c1 });
+    if (error) throw new Error(/different|same/i.test(error.message) ? 'Usa una contraseña diferente a la anterior.' : error.message);
+    sessionStorage.setItem('naza_desbloqueado', '1');
+    registrarEvento('ingreso');
+    toast('¡Listo! Tu contraseña quedó guardada.');
+    onListo();
+  };
+  return html`<div class="login"><div class="login-card">
+    <h2>Crea tu contraseña nueva</h2>
+    <${Field} label="Contraseña nueva"><${ClaveInput} value=${c1} onInput=${setC1} autocomplete="new-password" reglas=${true} /><//>
+    <${Field} label="Repítela"><${ClaveInput} value=${c2} onInput=${setC2} autocomplete="new-password" /><//>
+    <${AsyncButton} className="btn primary block" icon="check" onClick=${guardar}>Guardar y entrar<//>
+  </div></div>`;
+}
+
 function Bloqueo({ perfil, conf, onOk }) {
-  const intentar = async () => { await bioVerificar(conf); onOk(); };
+  const intentar = async () => { await bioVerificar(conf); registrarEvento('desbloqueo'); onOk(); };
   useEffect(() => { intentar().catch(() => {}); }, []);
   return html`<div class="login"><div class="login-card center">
     <img src="assets/logo.png" alt="" width="76" height="76" class="round" />
-    <h2>Hola, ${(perfil.nombre || '').split(' ')[0] || nombreUsuario(perfil.email)}</h2>
-    <p class="muted">Usa tu huella o rostro para abrir la app.</p>
+    <h2>Hola, ${(perfil.nombre || '').split(' ')[0] || perfil.usuario || nombreUsuario(perfil.email)}</h2>
+    <p class="muted">Usa tu huella o tu rostro para abrir la app.</p>
     <${AsyncButton} className="btn primary block" icon="shield" onClick=${intentar}>Desbloquear<//>
-    <button class="btn ghost block" onClick=${() => { bioDesactivar(); sb.auth.signOut(); }}>Entrar con contraseña</button>
+    <button class="btn ghost block" onClick=${() => { bioDesactivar(); salir(); }}>Entrar con contraseña</button>
   </div></div>`;
 }
 
 function SinAcceso({ email }) {
   return html`<div class="login"><div class="login-card center">
     <img src="assets/logo.png" alt="" width="72" height="72" class="round" />
-    <h2>Sin acceso</h2>
-    <p class="muted"><b>${nombreUsuario(email)}</b> no está autorizado o fue desactivado. Habla con el dueño.</p>
-    <button class="btn block" onClick=${() => sb.auth.signOut()}><${Icon} n="logout" size=${16} />Salir</button>
+    <h2>No tienes acceso</h2>
+    <p class="muted">El usuario <b>${nombreUsuario(email)}</b> no está habilitado. Habla con el administrador.</p>
+    <button class="btn block" onClick=${() => salir()}><${Icon} n="logout" size=${16} />Salir</button>
   </div></div>`;
 }
 
@@ -123,30 +159,29 @@ function MiCuenta({ perfil, onClose }) {
   const [puedeBio, setPuedeBio] = useState(false);
   useEffect(() => { bioDisponible().then(setPuedeBio); }, []);
   const cambiar = async () => {
-    if (c1.length < 8) throw new Error('La contraseña debe tener al menos 8 caracteres.');
-    if (c1 !== c2) throw new Error('Las contraseñas no coinciden.');
+    const err = claveInvalida(c1); if (err) throw new Error(err);
+    if (c1 !== c2) throw new Error('Las dos contraseñas no coinciden.');
     const { error } = await sb.auth.updateUser({ password: c1 });
-    if (error) throw new Error(/different|same/i.test(error.message) ? 'Usa una contraseña distinta a la anterior.' : error.message);
-    setC1(''); setC2(''); toast('Contraseña actualizada');
+    if (error) throw new Error(/different|same/i.test(error.message) ? 'Usa una contraseña diferente a la anterior.' : error.message);
+    setC1(''); setC2(''); toast('Tu contraseña quedó actualizada');
   };
-  const activar = async () => { await bioActivar(perfil.email, perfil.nombre); setBio(true); toast('Huella activada en este dispositivo'); };
+  const activar = async () => { await bioActivar(perfil.email, perfil.nombre); setBio(true); toast('Listo: la próxima vez entrarás con tu huella'); };
   return html`<${Modal} title="Mi cuenta" onClose=${onClose}>
     <div class="me-card"><div class="avatar">${(perfil.nombre || perfil.email).slice(0, 1).toUpperCase()}</div>
-      <div><b>${perfil.nombre || nombreUsuario(perfil.email)}</b><span class="muted">Usuario: ${perfil.usuario || nombreUsuario(perfil.email)} · ${ROLES[perfil.rol]}</span></div></div>
+      <div><b>${perfil.nombre || nombreUsuario(perfil.email)}</b><span class="muted">Usuario: ${perfil.usuario || nombreUsuario(perfil.email)} · ${ROLES[perfil.rol]}</span>
+      ${perfil.correo && html`<span class="muted small">Correo de recuperación: ${perfil.correo}</span>`}</div></div>
     <div class="section-title">Huella o rostro</div>
-    ${!puedeBio ? html`<p class="muted">Este dispositivo o navegador no permite desbloqueo biométrico.</p>` : bio ?
-      html`<div class="info"><${Icon} n="shield" size=${16} />Activo en este dispositivo: la app pide tu huella al abrirse.</div>
-        <button class="btn ghost" onClick=${() => { bioDesactivar(); setBio(false); toast('Huella desactivada'); }}>Desactivar huella</button>` :
-      html`<p class="muted">Al abrir la app te pedirá tu huella o rostro en lugar de la contraseña.</p>
-        <${AsyncButton} className="btn" icon="shield" onClick=${activar}>Activar huella en este dispositivo<//>`}
+    ${!puedeBio ? html`<p class="muted">Este dispositivo no permite entrar con huella o rostro.</p>` : bio ?
+      html`<div class="info"><${Icon} n="shield" size=${16} />Activado en este dispositivo: la app te pedirá tu huella al abrirse.</div>
+        <button class="btn ghost" onClick=${() => { bioDesactivar(); setBio(false); toast('Huella desactivada'); }}>Desactivar</button>` :
+      html`<p class="muted">Abre la app con tu huella o tu rostro en lugar de escribir la contraseña.</p>
+        <${AsyncButton} className="btn" icon="shield" onClick=${activar}>Activar en este dispositivo<//>`}
     <div class="section-title">Cambiar contraseña</div>
-    <div class="form-grid">
-      <${Field} label="Nueva contraseña"><input class="input" type="password" autocomplete="new-password" value=${c1} onInput=${(e) => setC1(e.target.value)} /><//>
-      <${Field} label="Repite la contraseña"><input class="input" type="password" autocomplete="new-password" value=${c2} onInput=${(e) => setC2(e.target.value)} /><//>
-    </div>
+    <${Field} label="Contraseña nueva"><${ClaveInput} value=${c1} onInput=${setC1} autocomplete="new-password" reglas=${!!c1} /><//>
+    <${Field} label="Repítela"><${ClaveInput} value=${c2} onInput=${setC2} autocomplete="new-password" /><//>
     <${AsyncButton} className="btn primary" icon="check" disabled=${!c1} onClick=${cambiar}>Guardar contraseña<//>
     <hr class="sep" />
-    <button class="btn danger-ghost block" onClick=${() => { sessionStorage.removeItem('naza_desbloqueado'); sb.auth.signOut(); }}><${Icon} n="logout" size=${16} />Cerrar sesión</button>
+    <button class="btn danger-ghost block" onClick=${() => salir()}><${Icon} n="logout" size=${16} />Cerrar sesión</button>
   <//>`;
 }
 
@@ -218,15 +253,18 @@ function Shell({ session, perfil }) {
   </div>`;
 }
 
+const ES_RECUPERACION = /type=recovery/.test(location.hash);
+
 function App() {
   const [estado, setEstado] = useState({ cargando: true, session: null, perfil: null });
   const [abierto, setAbierto] = useState(desbloqueado());
+  const [recuperando, setRecuperando] = useState(ES_RECUPERACION);
 
   useEffect(() => {
     const evaluar = async (session) => {
       if (!session) return setEstado({ cargando: false, session: null, perfil: null });
       try {
-        const perfil = await q(sb.from('administradores').select('email,nombre,rol,usuario,activo,telefono,capacidad_canastas').eq('email', session.user.email.toLowerCase()).maybeSingle());
+        const perfil = await q(sb.from('administradores').select('email,nombre,rol,usuario,correo,activo,telefono,capacidad_canastas').eq('email', session.user.email.toLowerCase()).maybeSingle());
         setEstado({ cargando: false, session, perfil: perfil && perfil.activo ? perfil : null });
       } catch (e) {
         setEstado({ cargando: false, session, perfil: null });
@@ -237,6 +275,7 @@ function App() {
       evaluar(data.session);
     });
     const { data: sub } = sb.auth.onAuthStateChange((ev, session) => {
+      if (ev === 'PASSWORD_RECOVERY') { setRecuperando(true); evaluar(session); }
       if (ev === 'SIGNED_IN') { if (desbloqueado()) setAbierto(true); evaluar(session); }
       if (ev === 'SIGNED_OUT') evaluar(null);
     });
@@ -245,6 +284,7 @@ function App() {
 
   if (estado.cargando) return html`<div class="boot"><img src="assets/logo.png" alt="" width="88" height="88" /><span>Cargando…</span></div>`;
   if (!estado.session) return html`<${Login} /><${Toaster} />`;
+  if (recuperando) return html`<${NuevaClave} onListo=${() => { setRecuperando(false); setAbierto(true); }} /><${Toaster} />`;
   if (!estado.perfil) return html`<${SinAcceso} email=${estado.session.user.email} />`;
   const conf = bioConfig(estado.perfil.email);
   if (conf && !abierto) return html`<${Bloqueo} perfil=${estado.perfil} conf=${conf} onOk=${() => setAbierto(true)} /><${Toaster} />`;

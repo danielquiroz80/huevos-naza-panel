@@ -1,5 +1,5 @@
 import { html, useState, useMemo, Icon, Card, Tabs, SearchBox, Loader, Empty, ErrorBox, Modal, Field, AsyncButton, Badge, useAsync, toast } from '../ui.js';
-import { sb, q, money, num, fechaHora, norm, SOLICITUDES, accion, usuarios, ROLES, nombreUsuario } from '../lib.js';
+import { sb, q, money, num, fechaHora, fecha, norm, SOLICITUDES, accion, usuarios, ROLES, nombreUsuario, claveInvalida, sugerirClave, REGLAS_CLAVE, diasDesde } from '../lib.js';
 
 function Solicitudes() {
   const r = useAsync(() => q(sb.from('v_solicitudes_abiertas').select('*').order('created_at')), []);
@@ -101,7 +101,7 @@ function Configuracion({ perfil }) {
     ${!r.data ? html`<div class="card-body"><${Loader} /></div>` : html`<div class="list">${r.data.map((c) => html`<div class="row-item static" key=${c.clave}>
       <div class="ri-main"><b>${DESCRIPCIONES[c.clave] || c.descripcion || c.clave}</b><span class=${c.valor ? '' : 'muted'}>${c.valor || 'Sin configurar'}</span><span class="ri-meta">${c.clave}</span></div>
       <div class="ri-side">${dueno && html`<button class="btn sm ghost" onClick=${() => setEdit({ ...c, valor: c.valor || '' })}><${Icon} n="edit" size=${14} />Editar</button>`}</div></div>`)}</div>`}
-    ${!dueno && html`<p class="muted small pad">Solo el dueño puede cambiar la configuración.</p>`}
+    ${!dueno && html`<p class="muted small pad">Solo un administrador puede cambiar la configuración.</p>`}
     ${edit && html`<${Modal} title="Editar configuración" onClose=${() => setEdit(null)}
       footer=${html`<button class="btn ghost" onClick=${() => setEdit(null)}>Cancelar</button><${AsyncButton} className="btn primary" icon="check" onClick=${guardar}>Guardar<//>`}>
       <${Field} label=${DESCRIPCIONES[edit.clave] || edit.clave}><input class="input" value=${edit.valor} onInput=${(e) => setEdit({ ...edit, valor: e.target.value })} /><//>
@@ -111,65 +111,118 @@ function Configuracion({ perfil }) {
 }
 
 function Equipo({ perfil }) {
-  const r = useAsync(async () => {
-    const [admins, registro] = await Promise.all([
-      q(sb.from('administradores').select('*').order('rol').order('nombre')),
-      q(sb.from('registro_panel').select('*').order('created_at', { ascending: false }).limit(60))
-    ]);
-    return { admins, registro };
-  }, []);
+  const r = useAsync(() => q(sb.from('administradores').select('*').order('rol').order('nombre')), []);
   const [dlg, setDlg] = useState(null);
-  const d = r.data;
-  const resumen = (x) => {
-    if (x.accion === 'update' && x.detalle) return Object.entries(x.detalle).map(([k, v]) => `${k}: ${v.antes ?? '—'} → ${v.despues ?? '—'}`).join(' · ');
-    if (x.detalle) return Object.entries(x.detalle).filter(([k]) => !['created_at', 'updated_at'].includes(k)).slice(0, 4).map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`).join(' · ');
-    return '';
-  };
   const set = (k) => (e) => setDlg({ ...dlg, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value });
   const guardar = async () => {
+    if (dlg.t !== 'editar') { const err = claveInvalida(dlg.clave); if (err) throw new Error(err); }
     if (dlg.t === 'nuevo') {
-      await usuarios({ accion: 'crear', usuario: dlg.usuario, nombre: dlg.nombre, rol: dlg.rol, clave: dlg.clave, telefono: dlg.telefono, capacidad_canastas: dlg.rol === 'repartidor' ? dlg.capacidad_canastas : null });
-      toast('Usuario creado. Entrega a ' + (dlg.nombre || dlg.usuario) + ' su usuario y contraseña.');
+      if (!dlg.usuario) throw new Error('Escribe el nombre de usuario.');
+      await usuarios({ accion: 'crear', usuario: dlg.usuario, nombre: dlg.nombre, rol: dlg.rol, clave: dlg.clave, correo: dlg.correo, telefono: dlg.telefono, capacidad_canastas: dlg.rol === 'repartidor' ? dlg.capacidad_canastas : null });
+      toast('Usuario creado. Comparte el usuario y la contraseña con ' + (dlg.nombre || dlg.usuario) + '.');
     } else if (dlg.t === 'editar') {
-      await usuarios({ accion: 'editar', email: dlg.email, nombre: dlg.nombre, rol: dlg.rol, telefono: dlg.telefono, capacidad_canastas: dlg.rol === 'repartidor' ? dlg.capacidad_canastas : null, activo: dlg.activo });
+      await usuarios({ accion: 'editar', email: dlg.email, nombre: dlg.nombre, rol: dlg.rol, correo: dlg.correo, telefono: dlg.telefono, capacidad_canastas: dlg.rol === 'repartidor' ? dlg.capacidad_canastas : null, activo: dlg.activo });
       toast('Cambios guardados');
     } else {
       await usuarios({ accion: 'clave', email: dlg.email, clave: dlg.clave });
-      toast('Contraseña cambiada');
+      toast('Contraseña cambiada. Compártela con ' + (dlg.nombre || 'la persona') + '.');
     }
     setDlg(null); r.reload();
   };
-  const sugerir = () => { const c = 'abcdefghjkmnpqrstuvwxyz23456789'; let x = ''; const a = crypto.getRandomValues(new Uint8Array(10)); a.forEach((n) => { x += c[n % c.length]; }); return x; };
+  const copiar = (t) => navigator.clipboard && navigator.clipboard.writeText(t).then(() => toast('Copiado'));
+  const reglas = (c) => html`<ul class="reglas">${REGLAS_CLAVE.map((x) => html`<li key=${x.t} class=${x.f(c || '') ? 'ok' : ''}><${Icon} n=${x.f(c || '') ? 'check' : 'x'} size=${13} />${x.t}</li>`)}</ul>`;
+  const d = r.data;
   return html`<div class="stack">
-    <${Card} title="Personas con acceso" icon="shield" pad=${false}
-      action=${html`<button class="btn sm primary" onClick=${() => setDlg({ t: 'nuevo', usuario: '', nombre: '', rol: 'repartidor', clave: sugerir(), telefono: '', capacidad_canastas: '' })}><${Icon} n="plus" size=${14} />Nuevo usuario</button>`}>
-      ${!d ? html`<div class="card-body"><${Loader} /></div>` : html`<div class="list">${d.admins.map((a) => html`<div class="row-item static" key=${a.email}>
-        <div class="avatar soft">${(a.nombre || a.email).slice(0, 1).toUpperCase()}</div>
-        <div class="ri-main"><b>${a.nombre || nombreUsuario(a.email)}</b>
-          <span class="muted">Usuario: ${a.usuario || nombreUsuario(a.email)}${a.telefono ? ' · ' + a.telefono : ''}${a.capacidad_canastas ? ' · ' + a.capacidad_canastas + ' canastas' : ''}</span></div>
-        <div class="ri-side"><div class="ri-badges"><${Badge} tone=${a.rol === 'dueno' ? 'amber' : a.rol === 'repartidor' ? 'violet' : 'blue'}>${ROLES[a.rol]}<//>${!a.activo && html`<${Badge} tone="gray">Inactivo<//>`}</div>
-          <div class="row-btns"><button class="btn sm ghost" onClick=${() => setDlg({ t: 'editar', ...a, telefono: a.telefono || '', capacidad_canastas: a.capacidad_canastas || '' })}>Editar</button>
-          <button class="btn sm ghost" onClick=${() => setDlg({ t: 'clave', email: a.email, nombre: a.nombre, clave: sugerir() })}>Contraseña</button></div></div></div>`)}</div>`}
+    <${Card} title="Usuarios" icon="users" pad=${false}
+      action=${html`<button class="btn sm primary" onClick=${() => setDlg({ t: 'nuevo', usuario: '', nombre: '', rol: 'repartidor', clave: sugerirClave(), correo: '', telefono: '', capacidad_canastas: '' })}><${Icon} n="plus" size=${14} />Agregar usuario</button>`}>
+      <${ErrorBox} error=${r.error} onRetry=${r.reload} />
+      ${!d ? html`<div class="card-body"><${Loader} /></div>` : html`<div class="list">${d.map((a) => html`<div class="row-item static" key=${a.email}>
+        <div class="avatar soft">${(a.nombre || a.usuario || a.email).slice(0, 1).toUpperCase()}</div>
+        <div class="ri-main"><b>${a.nombre || a.usuario}</b>
+          <span class="muted">@${a.usuario || nombreUsuario(a.email)}${a.correo ? ' · ' + a.correo : ''}${a.telefono ? ' · ' + a.telefono : ''}${a.capacidad_canastas ? ' · ' + a.capacidad_canastas + ' canastas' : ''}</span></div>
+        <div class="ri-side"><div class="ri-badges"><${Badge} tone=${a.rol === 'dueno' ? 'amber' : a.rol === 'repartidor' ? 'violet' : 'blue'}>${ROLES[a.rol]}<//>${!a.activo && html`<${Badge} tone="gray">Desactivado<//>`}</div>
+          <div class="row-btns"><button class="btn sm ghost" onClick=${() => setDlg({ t: 'editar', ...a, correo: a.correo || '', telefono: a.telefono || '', capacidad_canastas: a.capacidad_canastas || '' })}>Editar</button>
+          <button class="btn sm ghost" onClick=${() => setDlg({ t: 'clave', email: a.email, nombre: a.nombre, clave: sugerirClave() })}>Nueva contraseña</button></div></div></div>`)}</div>`}
+      <p class="muted small pad">Admin: ve y administra todo · Operador: pedidos y entregas · Repartidor: solo su ruta.</p>
     <//>
-    <${Card} title="Registro de cambios" icon="history" pad=${false}>
-      ${!d ? html`<div class="card-body"><${Loader} /></div>` : d.registro.length === 0 ? html`<${Empty} icon="history" title="Sin cambios registrados todavía" />` :
-        html`<div class="table-wrap"><table class="table"><thead><tr><th>Fecha</th><th>Quién</th><th>Qué</th><th>Detalle</th></tr></thead><tbody>
-          ${d.registro.map((x) => html`<tr key=${x.id}><td>${fechaHora(x.created_at)}</td><td>${nombreUsuario(x.email)}</td><td>${x.accion} ${x.tabla || ''}${x.registro_id ? ' #' + x.registro_id : ''}</td><td class="muted small">${resumen(x)}</td></tr>`)}
-        </tbody></table></div>`}
-    <//>
-    ${dlg && html`<${Modal} title=${dlg.t === 'nuevo' ? 'Nuevo usuario' : dlg.t === 'editar' ? 'Editar ' + (dlg.nombre || dlg.usuario) : 'Nueva contraseña para ' + (dlg.nombre || nombreUsuario(dlg.email))} onClose=${() => setDlg(null)}
+    ${dlg && html`<${Modal} title=${dlg.t === 'nuevo' ? 'Agregar usuario' : dlg.t === 'editar' ? 'Editar a ' + (dlg.nombre || dlg.usuario) : 'Nueva contraseña para ' + (dlg.nombre || nombreUsuario(dlg.email))} onClose=${() => setDlg(null)}
       footer=${html`<button class="btn ghost" onClick=${() => setDlg(null)}>Cancelar</button><${AsyncButton} className="btn primary" icon="check" onClick=${guardar}>Guardar<//>`}>
       ${dlg.t !== 'clave' && html`<div class="form-grid">
         ${dlg.t === 'nuevo' && html`<${Field} label="Usuario" hint="Sin espacios ni tildes. Ej.: carlos"><input class="input" autocapitalize="none" value=${dlg.usuario} onInput=${(e) => setDlg({ ...dlg, usuario: e.target.value.toLowerCase().replace(/\s+/g, '') })} /><//>`}
-        <${Field} label="Nombre"><input class="input" value=${dlg.nombre || ''} onInput=${set('nombre')} /><//>
+        <${Field} label="Nombre"><input class="input" value=${dlg.nombre || ''} onInput=${set('nombre')} placeholder="Nombre y apellido" /><//>
         <${Field} label="Rol"><select class="input" value=${dlg.rol} onChange=${set('rol')} disabled=${dlg.email === perfil.email}>
-          <option value="repartidor">Repartidor (solo su ruta)</option><option value="operador">Operador (pedidos y entregas)</option><option value="dueno">Dueño (todo)</option></select><//>
-        <${Field} label="Teléfono"><input class="input" type="tel" value=${dlg.telefono || ''} onInput=${set('telefono')} /><//>
-        ${dlg.rol === 'repartidor' && html`<${Field} label="Capacidad (canastas)" hint="Cuántas canastas caben en su vehículo"><input class="input" type="number" min="1" value=${dlg.capacidad_canastas} onInput=${set('capacidad_canastas')} /><//>`}
+          <option value="repartidor">Repartidor</option><option value="operador">Operador</option><option value="dueno">Admin</option></select><//>
+        <${Field} label="Correo (opcional)" hint="Sirve para recuperar la contraseña"><input class="input" type="email" autocapitalize="none" value=${dlg.correo || ''} onInput=${set('correo')} /><//>
+        <${Field} label="Teléfono (opcional)"><input class="input" type="tel" value=${dlg.telefono || ''} onInput=${set('telefono')} /><//>
+        ${dlg.rol === 'repartidor' && html`<${Field} label="Capacidad (canastas)" hint="Cuántas caben en su vehículo"><input class="input" type="number" min="1" value=${dlg.capacidad_canastas} onInput=${set('capacidad_canastas')} /><//>`}
       </div>`}
       ${dlg.t === 'editar' && dlg.email !== perfil.email && html`<label class="switch"><input type="checkbox" checked=${!!dlg.activo} onChange=${set('activo')} /><span></span>Puede entrar a la app</label>`}
-      ${dlg.t !== 'editar' && html`<${Field} label="Contraseña" hint="Mínimo 8 caracteres. Compártela por un medio privado; la persona puede cambiarla en Mi cuenta.">
-        <input class="input mono" value=${dlg.clave} onInput=${set('clave')} /><//>`}
+      ${dlg.t !== 'editar' && html`<${Field} label="Contraseña">
+        <div class="origen"><input class="input mono" value=${dlg.clave} onInput=${set('clave')} />
+          <button type="button" class="btn ghost" onClick=${() => setDlg({ ...dlg, clave: sugerirClave() })}>Generar</button>
+          <button type="button" class="btn ghost" onClick=${() => copiar(dlg.clave)}>Copiar</button></div>
+        ${reglas(dlg.clave)}<//>
+        <p class="muted small">Compártela por un medio privado. La persona puede cambiarla después en "Mi cuenta".</p>`}
+    <//>`}
+  </div>`;
+}
+
+const EVENTOS = { ingreso: 'Entró', desbloqueo: 'Desbloqueó con huella', salida: 'Cerró sesión', fallido: 'Intento fallido', recuperacion: 'Pidió recuperar contraseña' };
+
+function Actividad() {
+  const r = useAsync(async () => {
+    const desde = new Date(Date.now() - 30 * 86400000).toISOString();
+    const [admins, ingresos, registro] = await Promise.all([
+      q(sb.from('administradores').select('email,usuario,nombre,rol,activo')),
+      q(sb.from('inicios_sesion').select('*').gte('created_at', desde).order('created_at', { ascending: false }).limit(1000)),
+      q(sb.from('registro_panel').select('*').order('created_at', { ascending: false }).limit(150))
+    ]);
+    return { admins, ingresos, registro };
+  }, []);
+  const [vista, setVista] = useState('resumen');
+  const [quien, setQuien] = useState('');
+  const d = r.data;
+  const resumenCambio = (x) => {
+    if (x.accion === 'update' && x.detalle) return Object.entries(x.detalle).map(([k, v]) => `${k}: ${v && v.antes != null ? v.antes : '—'} → ${v && v.despues != null ? v.despues : '—'}`).join(' · ');
+    if (x.detalle) return Object.entries(x.detalle).filter(([k]) => !['created_at', 'updated_at', 'origen'].includes(k)).slice(0, 4).map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`).join(' · ');
+    return '';
+  };
+  const ACC = { update: 'Modificó', insert: 'Agregó', encamino: 'En camino', entregado: 'Entregado', cancelar: 'Canceló', pago_registrar: 'Registró pago', pago_verificar: 'Verificó pago', resolver: 'Resolvió caso', lista_espera: 'Avisó lista de espera', entrega: 'Entrega', ruta_iniciar: 'Inició ruta', ruta_optimizar: 'Ordenó ruta' };
+  if (!d) return html`<${ErrorBox} error=${r.error} onRetry=${r.reload} /><${Loader} rows=${6} />`;
+  const nombre = (email, usuario) => { const a = d.admins.find((x) => x.email === email || (usuario && x.usuario === usuario)); return a ? (a.nombre || a.usuario) : (usuario || nombreUsuario(email) || 'Desconocido'); };
+  const filas = d.admins.map((a) => {
+    const ev = d.ingresos.filter((x) => x.email === a.email);
+    const ok = ev.filter((x) => x.evento === 'ingreso' || x.evento === 'desbloqueo');
+    return { ...a, ultimo: ok[0], ingresos: ok.length, fallidos: ev.filter((x) => x.evento === 'fallido' && diasDesde(x.created_at) <= 7).length };
+  }).sort((a, b) => String(b.ultimo ? b.ultimo.created_at : '').localeCompare(String(a.ultimo ? a.ultimo.created_at : '')));
+  const fallidosDesconocidos = d.ingresos.filter((x) => x.evento === 'fallido' && !x.email).length;
+  const eventos = quien ? d.ingresos.filter((x) => x.email === quien) : d.ingresos;
+  const cambios = quien ? d.registro.filter((x) => x.email === quien) : d.registro;
+  return html`<div class="stack">
+    <div class="toolbar">
+      <${Tabs} value=${vista} onChange=${setVista} items=${[{ v: 'resumen', label: 'Resumen' }, { v: 'ingresos', label: 'Ingresos', n: eventos.length }, { v: 'cambios', label: 'Cambios y acciones', n: cambios.length }]} />
+      ${vista !== 'resumen' && html`<select class="input auto" value=${quien} onChange=${(e) => setQuien(e.target.value)}><option value="">Todas las personas</option>
+        ${d.admins.map((a) => html`<option value=${a.email}>${a.nombre || a.usuario}</option>`)}</select>`}
+    </div>
+    ${vista === 'resumen' && html`<${Card} title="Ingresos de los últimos 30 días" icon="shield" pad=${false}>
+      <div class="table-wrap"><table class="table"><thead><tr><th>Persona</th><th>Rol</th><th>Último ingreso</th><th>Dispositivo</th><th class="r">Ingresos</th><th class="r">Fallidos (7 días)</th></tr></thead><tbody>
+        ${filas.map((a) => html`<tr key=${a.email}><td><b>${a.nombre || a.usuario}</b><br /><small class="muted">@${a.usuario || nombreUsuario(a.email)}</small></td><td>${ROLES[a.rol]}</td>
+          <td>${a.ultimo ? fechaHora(a.ultimo.created_at) : html`<span class="muted">Sin ingresos</span>`}</td><td class="muted small">${a.ultimo ? a.ultimo.dispositivo : ''}</td>
+          <td class="r">${num(a.ingresos)}</td><td class=${'r ' + (a.fallidos ? 'neg' : '')}>${num(a.fallidos)}</td></tr>`)}
+      </tbody></table></div>
+      ${fallidosDesconocidos > 0 && html`<p class="warn m"><${Icon} n="alert" size=${16} />${fallidosDesconocidos} intento(s) con usuarios que no existen en los últimos 30 días.</p>`}
+      <p class="muted small pad">Los ingresos se registran desde esta versión de la app.</p>
+    <//>`}
+    ${vista === 'ingresos' && html`<${Card} pad=${false}>
+      ${!eventos.length ? html`<${Empty} icon="shield" title="Sin registros" />` : html`<div class="table-wrap tall"><table class="table"><thead><tr><th>Fecha</th><th>Persona</th><th>Qué pasó</th><th>Dispositivo</th></tr></thead><tbody>
+        ${eventos.map((x) => html`<tr key=${x.id}><td>${fechaHora(x.created_at)}</td><td>${nombre(x.email, x.usuario)}</td>
+          <td><${Badge} tone=${x.evento === 'fallido' ? 'red' : x.evento === 'salida' ? 'gray' : x.evento === 'recuperacion' ? 'amber' : 'green'}>${EVENTOS[x.evento]}<//></td><td class="muted small">${x.dispositivo || ''}</td></tr>`)}
+      </tbody></table></div>`}
+    <//>`}
+    ${vista === 'cambios' && html`<${Card} pad=${false}>
+      ${!cambios.length ? html`<${Empty} icon="history" title="Sin cambios registrados" />` : html`<div class="table-wrap tall"><table class="table"><thead><tr><th>Fecha</th><th>Persona</th><th>Acción</th><th>Detalle</th></tr></thead><tbody>
+        ${cambios.map((x) => html`<tr key=${x.id}><td>${fechaHora(x.created_at)}</td><td>${nombre(x.email)}</td><td>${ACC[x.accion] || x.accion} ${x.tabla || ''}${x.registro_id ? ' #' + x.registro_id : ''}</td><td class="muted small">${resumenCambio(x)}</td></tr>`)}
+      </tbody></table></div>`}
     <//>`}
   </div>`;
 }
@@ -191,10 +244,11 @@ function GoogleMaps() {
 export function Negocio({ perfil }) {
   const [tab, setTab] = useState('casos');
   return html`<div class="stack">
-    <div class="toolbar"><${Tabs} value=${tab} onChange=${setTab} items=${[{ v: 'casos', label: 'Casos de clientes' }, { v: 'zonas', label: 'Zonas' }, { v: 'config', label: 'Configuración' }, { v: 'equipo', label: 'Usuarios y registro' }]} /></div>
+    <div class="toolbar"><${Tabs} value=${tab} onChange=${setTab} items=${[{ v: 'casos', label: 'Casos de clientes' }, { v: 'zonas', label: 'Zonas' }, { v: 'config', label: 'Configuración' }, { v: 'equipo', label: 'Usuarios' }, { v: 'actividad', label: 'Actividad' }]} /></div>
     ${tab === 'casos' && html`<${Solicitudes} />`}
     ${tab === 'zonas' && html`<${Zonas} />`}
     ${tab === 'config' && html`<div class="stack"><${GoogleMaps} /><${Configuracion} perfil=${perfil} /></div>`}
     ${tab === 'equipo' && html`<${Equipo} perfil=${perfil} />`}
+    ${tab === 'actividad' && html`<${Actividad} />`}
   </div>`;
 }

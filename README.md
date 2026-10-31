@@ -1,6 +1,6 @@
 # Huevos de la Naza · Panel de administración
 
-App web (instalable en el celular) para que el dueño vea y administre el negocio sin tocar la base de datos.
+App web (instalable en el celular) para que el administrador vea y gestione el negocio sin tocar la base de datos.
 
 **Secciones**
 
@@ -19,11 +19,11 @@ App web (instalable en el celular) para que el dueño vea y administre el negoci
 
 | Rol | Ve |
 |---|---|
-| Dueño | Todo + usuarios, configuración, compras y finanzas |
+| Admin | Todo + usuarios, actividad (ingresos y cambios), configuración, compras y finanzas |
 | Operador | Pedidos y Entregas |
 | Repartidor | Solo "Mi ruta" |
 
-Inicio de sesión con **usuario y contraseña** (el dueño crea los usuarios en Negocio → Usuarios). Opcional: **desbloqueo con huella/rostro** en Mi cuenta.
+Inicio de sesión con **usuario y contraseña** (el Admin crea los usuarios en Administración → Usuarios). Contraseñas: mínimo 6 caracteres, letras y números, una mayúscula y un carácter especial. Recuperación por correo si el usuario tiene correo registrado; si no, el Admin asigna una nueva. Opcional: **desbloqueo con huella/rostro** en Mi cuenta.
 
 ## Entregas
 

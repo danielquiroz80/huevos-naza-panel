@@ -544,3 +544,15 @@ hr.sep { border: 0; border-top: 1px solid var(--line); margin: 4px 0; width: 100
   .origen { flex-wrap: wrap; }
   .origen .btn { flex: 1; }
 }
+
+/* v3: contraseñas */
+.pass-ver { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); border: 0; background: var(--gray-soft); color: var(--ink-3); font-weight: 700; font-size: 12px; padding: 6px 10px; border-radius: 8px; cursor: pointer; }
+.pass-ver:hover { background: var(--line); color: var(--ink); }
+.pass .input { padding-right: 76px; }
+.reglas { list-style: none; margin: 8px 0 0; padding: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; }
+.reglas li { display: flex; align-items: center; gap: 5px; font-size: 12.5px; color: var(--muted); font-weight: 600; }
+.reglas li .ico { color: var(--red); }
+.reglas li.ok { color: var(--green); }
+.reglas li.ok .ico { color: var(--green); }
+.me-card .small { font-size: 12.5px; }
+@media (max-width: 480px) { .reglas { grid-template-columns: 1fr; } }

@@ -16,9 +16,9 @@ export async function q(builder) {
 
 export function traducirError(m) {
   const s = String(m || '');
-  if (/row-level security|permission denied/i.test(s)) return 'No tienes permiso para esta acción.';
-  if (/JWT|expired/i.test(s)) return 'Tu sesión venció. Vuelve a entrar.';
-  if (/Failed to fetch|NetworkError/i.test(s)) return 'Sin conexión. Revisa tu internet.';
+  if (/row-level security|permission denied/i.test(s)) return 'No tienes permiso para hacer esto.';
+  if (/JWT|expired/i.test(s)) return 'Tu sesión terminó. Vuelve a entrar, por favor.';
+  if (/Failed to fetch|NetworkError/i.test(s)) return 'Parece que no hay conexión. Revisa tu internet e inténtalo de nuevo.';
   const m2 = /([A-Z_]{6,}): (.+)/.exec(s);
   return m2 ? m2[2] : s;
 }
@@ -73,7 +73,7 @@ export const ESTADOS = {
   no_entregado: { label: 'No entregado', tone: 'red' },
   cancelado: { label: 'Cancelado', tone: 'gray' }
 };
-export const ROLES = { dueno: 'Dueño', operador: 'Operador', repartidor: 'Repartidor' };
+export const ROLES = { dueno: 'Admin', operador: 'Operador', repartidor: 'Repartidor' };
 export const MOTIVOS = {
   cliente_ausente: 'No había nadie',
   direccion: 'Dirección incorrecta o no encontrada',
@@ -89,7 +89,42 @@ export function usuarioAEmail(u) {
 }
 export const nombreUsuario = (email) => String(email || '').endsWith('@' + DOMINIO_USUARIOS) ? email.split('@')[0] : email;
 
-/** Gestión de usuarios (función segura de Supabase, solo dueño). */
+/** Reglas de contraseña: mínimo 6, letras y números, una mayúscula y un carácter especial. */
+export function claveInvalida(c) {
+  c = String(c || '');
+  if (c.length < 6) return 'La contraseña debe tener al menos 6 caracteres.';
+  if (!/[A-Z]/.test(c)) return 'Agrega al menos una letra mayúscula.';
+  if (!/[a-zA-Z]/.test(c) || !/[0-9]/.test(c)) return 'Usa letras y números.';
+  if (!/[^A-Za-z0-9]/.test(c)) return 'Agrega al menos un carácter especial, por ejemplo * # ! @';
+  return null;
+}
+export const REGLAS_CLAVE = [
+  { t: 'Mínimo 6 caracteres', f: (c) => c.length >= 6 },
+  { t: 'Una letra mayúscula', f: (c) => /[A-Z]/.test(c) },
+  { t: 'Letras y números', f: (c) => /[a-zA-Z]/.test(c) && /[0-9]/.test(c) },
+  { t: 'Un carácter especial (* # ! @)', f: (c) => /[^A-Za-z0-9]/.test(c) }
+];
+export function sugerirClave() {
+  const may = 'ABCDEFGHJKLMNPQRSTUVWXYZ', min = 'abcdefghjkmnpqrstuvwxyz', num = '23456789', esp = '*#!@$%';
+  const r = (s) => s[crypto.getRandomValues(new Uint32Array(1))[0] % s.length];
+  return r(may) + r(min) + r(min) + r(min) + r(num) + r(num) + r(esp) + r(min);
+}
+export const dispositivo = () => {
+  const u = navigator.userAgent;
+  const so = /Android/i.test(u) ? 'Android' : /iPhone|iPad/i.test(u) ? 'iPhone/iPad' : /Windows/i.test(u) ? 'Windows' : /Mac/i.test(u) ? 'Mac' : 'Otro';
+  const nav = /Edg\//.test(u) ? 'Edge' : /Chrome\//.test(u) ? 'Chrome' : /Safari\//.test(u) ? 'Safari' : /Firefox\//.test(u) ? 'Firefox' : 'Navegador';
+  return so + ' · ' + nav + (matchMedia('(display-mode: standalone)').matches ? ' · app instalada' : '');
+};
+export async function registrarEvento(evento) {
+  try { await sb.rpc('panel_registrar_ingreso', { p_evento: evento, p_dispositivo: dispositivo() }); } catch (e) { /* no bloquea */ }
+}
+export async function salir() {
+  await registrarEvento('salida');
+  sessionStorage.removeItem('naza_desbloqueado');
+  await sb.auth.signOut();
+}
+
+/** Gestión de usuarios (función segura de Supabase, solo Admin). */
 export async function usuarios(payload) {
   const { data, error } = await sb.functions.invoke('admin-usuarios', { body: payload });
   if (error) {
@@ -155,7 +190,7 @@ export function rutaLink(paradas, origen) {
 /* ---------- Acciones con aviso al cliente (webhook de n8n) ---------- */
 export async function accion(payload) {
   const { data: { session } } = await sb.auth.getSession();
-  if (!session) throw new Error('Tu sesión venció. Vuelve a entrar.');
+  if (!session) throw new Error('Tu sesión terminó. Vuelve a entrar, por favor.');
   let r;
   try {
     r = await fetch(CONFIG.accionesUrl, {
