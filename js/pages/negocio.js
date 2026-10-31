@@ -1,5 +1,5 @@
 import { html, useState, useMemo, Icon, Card, Tabs, SearchBox, Loader, Empty, ErrorBox, Modal, Field, AsyncButton, Badge, useAsync, toast } from '../ui.js';
-import { sb, q, money, num, fechaHora, norm, SOLICITUDES, accion } from '../lib.js';
+import { sb, q, money, num, fechaHora, norm, SOLICITUDES, accion, usuarios, ROLES, nombreUsuario } from '../lib.js';
 
 function Solicitudes() {
   const r = useAsync(() => q(sb.from('v_solicitudes_abiertas').select('*').order('created_at')), []);
@@ -110,44 +110,91 @@ function Configuracion({ perfil }) {
   <//>`;
 }
 
-function Equipo() {
+function Equipo({ perfil }) {
   const r = useAsync(async () => {
     const [admins, registro] = await Promise.all([
-      q(sb.from('administradores').select('*').order('created_at')),
+      q(sb.from('administradores').select('*').order('rol').order('nombre')),
       q(sb.from('registro_panel').select('*').order('created_at', { ascending: false }).limit(60))
     ]);
     return { admins, registro };
   }, []);
+  const [dlg, setDlg] = useState(null);
   const d = r.data;
   const resumen = (x) => {
     if (x.accion === 'update' && x.detalle) return Object.entries(x.detalle).map(([k, v]) => `${k}: ${v.antes ?? '—'} → ${v.despues ?? '—'}`).join(' · ');
-    if (x.detalle) return Object.entries(x.detalle).filter(([k]) => !['created_at', 'updated_at'].includes(k)).slice(0, 4).map(([k, v]) => `${k}: ${v}`).join(' · ');
+    if (x.detalle) return Object.entries(x.detalle).filter(([k]) => !['created_at', 'updated_at'].includes(k)).slice(0, 4).map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`).join(' · ');
     return '';
   };
+  const set = (k) => (e) => setDlg({ ...dlg, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value });
+  const guardar = async () => {
+    if (dlg.t === 'nuevo') {
+      await usuarios({ accion: 'crear', usuario: dlg.usuario, nombre: dlg.nombre, rol: dlg.rol, clave: dlg.clave, telefono: dlg.telefono, capacidad_canastas: dlg.rol === 'repartidor' ? dlg.capacidad_canastas : null });
+      toast('Usuario creado. Entrega a ' + (dlg.nombre || dlg.usuario) + ' su usuario y contraseña.');
+    } else if (dlg.t === 'editar') {
+      await usuarios({ accion: 'editar', email: dlg.email, nombre: dlg.nombre, rol: dlg.rol, telefono: dlg.telefono, capacidad_canastas: dlg.rol === 'repartidor' ? dlg.capacidad_canastas : null, activo: dlg.activo });
+      toast('Cambios guardados');
+    } else {
+      await usuarios({ accion: 'clave', email: dlg.email, clave: dlg.clave });
+      toast('Contraseña cambiada');
+    }
+    setDlg(null); r.reload();
+  };
+  const sugerir = () => { const c = 'abcdefghjkmnpqrstuvwxyz23456789'; let x = ''; const a = crypto.getRandomValues(new Uint8Array(10)); a.forEach((n) => { x += c[n % c.length]; }); return x; };
   return html`<div class="stack">
-    <${Card} title="Personas con acceso" icon="shield" pad=${false}>
+    <${Card} title="Personas con acceso" icon="shield" pad=${false}
+      action=${html`<button class="btn sm primary" onClick=${() => setDlg({ t: 'nuevo', usuario: '', nombre: '', rol: 'repartidor', clave: sugerir(), telefono: '', capacidad_canastas: '' })}><${Icon} n="plus" size=${14} />Nuevo usuario</button>`}>
       ${!d ? html`<div class="card-body"><${Loader} /></div>` : html`<div class="list">${d.admins.map((a) => html`<div class="row-item static" key=${a.email}>
         <div class="avatar soft">${(a.nombre || a.email).slice(0, 1).toUpperCase()}</div>
-        <div class="ri-main"><b>${a.nombre || a.email}</b><span class="muted">${a.email}</span></div>
-        <div class="ri-side"><${Badge} tone=${a.rol === 'dueno' ? 'amber' : 'blue'}>${a.rol === 'dueno' ? 'Dueño' : 'Operador'}<//>${!a.activo && html`<${Badge} tone="gray">Inactivo<//>`}</div></div>`)}</div>`}
-      <p class="muted small pad">Para dar acceso a otra persona, agrega su correo en la tabla <code>administradores</code> (rol dueño u operador).</p>
+        <div class="ri-main"><b>${a.nombre || nombreUsuario(a.email)}</b>
+          <span class="muted">Usuario: ${a.usuario || nombreUsuario(a.email)}${a.telefono ? ' · ' + a.telefono : ''}${a.capacidad_canastas ? ' · ' + a.capacidad_canastas + ' canastas' : ''}</span></div>
+        <div class="ri-side"><div class="ri-badges"><${Badge} tone=${a.rol === 'dueno' ? 'amber' : a.rol === 'repartidor' ? 'violet' : 'blue'}>${ROLES[a.rol]}<//>${!a.activo && html`<${Badge} tone="gray">Inactivo<//>`}</div>
+          <div class="row-btns"><button class="btn sm ghost" onClick=${() => setDlg({ t: 'editar', ...a, telefono: a.telefono || '', capacidad_canastas: a.capacidad_canastas || '' })}>Editar</button>
+          <button class="btn sm ghost" onClick=${() => setDlg({ t: 'clave', email: a.email, nombre: a.nombre, clave: sugerir() })}>Contraseña</button></div></div></div>`)}</div>`}
     <//>
     <${Card} title="Registro de cambios" icon="history" pad=${false}>
       ${!d ? html`<div class="card-body"><${Loader} /></div>` : d.registro.length === 0 ? html`<${Empty} icon="history" title="Sin cambios registrados todavía" />` :
         html`<div class="table-wrap"><table class="table"><thead><tr><th>Fecha</th><th>Quién</th><th>Qué</th><th>Detalle</th></tr></thead><tbody>
-          ${d.registro.map((x) => html`<tr key=${x.id}><td>${fechaHora(x.created_at)}</td><td>${x.email}</td><td>${x.accion} ${x.tabla}${x.registro_id ? ' #' + x.registro_id : ''}</td><td class="muted small">${resumen(x)}</td></tr>`)}
+          ${d.registro.map((x) => html`<tr key=${x.id}><td>${fechaHora(x.created_at)}</td><td>${nombreUsuario(x.email)}</td><td>${x.accion} ${x.tabla || ''}${x.registro_id ? ' #' + x.registro_id : ''}</td><td class="muted small">${resumen(x)}</td></tr>`)}
         </tbody></table></div>`}
     <//>
+    ${dlg && html`<${Modal} title=${dlg.t === 'nuevo' ? 'Nuevo usuario' : dlg.t === 'editar' ? 'Editar ' + (dlg.nombre || dlg.usuario) : 'Nueva contraseña para ' + (dlg.nombre || nombreUsuario(dlg.email))} onClose=${() => setDlg(null)}
+      footer=${html`<button class="btn ghost" onClick=${() => setDlg(null)}>Cancelar</button><${AsyncButton} className="btn primary" icon="check" onClick=${guardar}>Guardar<//>`}>
+      ${dlg.t !== 'clave' && html`<div class="form-grid">
+        ${dlg.t === 'nuevo' && html`<${Field} label="Usuario" hint="Sin espacios ni tildes. Ej.: carlos"><input class="input" autocapitalize="none" value=${dlg.usuario} onInput=${(e) => setDlg({ ...dlg, usuario: e.target.value.toLowerCase().replace(/\s+/g, '') })} /><//>`}
+        <${Field} label="Nombre"><input class="input" value=${dlg.nombre || ''} onInput=${set('nombre')} /><//>
+        <${Field} label="Rol"><select class="input" value=${dlg.rol} onChange=${set('rol')} disabled=${dlg.email === perfil.email}>
+          <option value="repartidor">Repartidor (solo su ruta)</option><option value="operador">Operador (pedidos y entregas)</option><option value="dueno">Dueño (todo)</option></select><//>
+        <${Field} label="Teléfono"><input class="input" type="tel" value=${dlg.telefono || ''} onInput=${set('telefono')} /><//>
+        ${dlg.rol === 'repartidor' && html`<${Field} label="Capacidad (canastas)" hint="Cuántas canastas caben en su vehículo"><input class="input" type="number" min="1" value=${dlg.capacidad_canastas} onInput=${set('capacidad_canastas')} /><//>`}
+      </div>`}
+      ${dlg.t === 'editar' && dlg.email !== perfil.email && html`<label class="switch"><input type="checkbox" checked=${!!dlg.activo} onChange=${set('activo')} /><span></span>Puede entrar a la app</label>`}
+      ${dlg.t !== 'editar' && html`<${Field} label="Contraseña" hint="Mínimo 8 caracteres. Compártela por un medio privado; la persona puede cambiarla en Mi cuenta.">
+        <input class="input mono" value=${dlg.clave} onInput=${set('clave')} /><//>`}
+    <//>`}
   </div>`;
+}
+
+function GoogleMaps() {
+  const r = useAsync(() => q(sb.rpc('panel_secretos_configurados')), []);
+  const [clave, setClave] = useState('');
+  const activa = (r.data || []).includes('google_maps_key');
+  const guardar = async (v) => { await q(sb.rpc('panel_guardar_secreto', { p_clave: 'google_maps_key', p_valor: v })); setClave(''); toast(v ? 'Clave guardada' : 'Clave eliminada'); r.reload(); };
+  return html`<${Card} title="Google Maps (rutas de entrega)" icon="pin">
+    <p class="muted small">Con la clave, la ruta se ordena con Google Maps (direcciones colombianas y tiempos reales). Sin ella, el orden es aproximado.
+      La clave se guarda cifrada en el servidor y nadie puede leerla desde la app.</p>
+    <div class="origen"><input class="input mono" type="password" placeholder=${activa ? 'Clave configurada ✓ — escribe otra para cambiarla' : 'Pega aquí la clave de Google Maps'} value=${clave} onInput=${(e) => setClave(e.target.value)} />
+      <${AsyncButton} className="btn primary" icon="check" disabled=${clave.trim().length < 20} onClick=${() => guardar(clave)}>Guardar<//></div>
+    ${activa && html`<div class="row-btns"><${Badge} tone="green">Activa<//><${AsyncButton} className="btn sm danger-ghost" icon="x" onClick=${() => guardar('')}>Quitar clave<//></div>`}
+  <//>`;
 }
 
 export function Negocio({ perfil }) {
   const [tab, setTab] = useState('casos');
   return html`<div class="stack">
-    <div class="toolbar"><${Tabs} value=${tab} onChange=${setTab} items=${[{ v: 'casos', label: 'Casos de clientes' }, { v: 'zonas', label: 'Zonas' }, { v: 'config', label: 'Configuración' }, { v: 'equipo', label: 'Equipo y registro' }]} /></div>
+    <div class="toolbar"><${Tabs} value=${tab} onChange=${setTab} items=${[{ v: 'casos', label: 'Casos de clientes' }, { v: 'zonas', label: 'Zonas' }, { v: 'config', label: 'Configuración' }, { v: 'equipo', label: 'Usuarios y registro' }]} /></div>
     ${tab === 'casos' && html`<${Solicitudes} />`}
     ${tab === 'zonas' && html`<${Zonas} />`}
-    ${tab === 'config' && html`<${Configuracion} perfil=${perfil} />`}
-    ${tab === 'equipo' && html`<${Equipo} />`}
+    ${tab === 'config' && html`<div class="stack"><${GoogleMaps} /><${Configuracion} perfil=${perfil} /></div>`}
+    ${tab === 'equipo' && html`<${Equipo} perfil=${perfil} />`}
   </div>`;
 }

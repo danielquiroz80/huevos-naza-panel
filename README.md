@@ -15,12 +15,30 @@ App web (instalable en el celular) para que el dueño vea y administre el negoci
 | Planeación | Demanda estimada de la próxima entrega por producto (pedidos + pedidos fijos + promedio + lista de espera) y cuánto conseguir |
 | Negocio | Casos de clientes (resolver con mensaje), cobertura por barrio, configuración, personas con acceso y registro de cambios |
 
+## Roles
+
+| Rol | Ve |
+|---|---|
+| Dueño | Todo + usuarios, configuración, compras y finanzas |
+| Operador | Pedidos y Entregas |
+| Repartidor | Solo "Mi ruta" |
+
+Inicio de sesión con **usuario y contraseña** (el dueño crea los usuarios en Negocio → Usuarios). Opcional: **desbloqueo con huella/rostro** en Mi cuenta.
+
+## Entregas
+
+- **Planear ruta**: día, repartidor, punto de salida (dirección o ubicación actual), orden automático (Google Maps si hay clave, si no aproximado), reordenar a mano, hoja de carga, mapa e inicio del recorrido.
+- **Mi ruta (repartidor)**: parada actual con navegación (Google Maps/Waze), llamar/WhatsApp, indicaciones, **Entregado** (foto y ubicación opcionales) o **No entregado** con motivo.
+- Avisos automáticos por Telegram: inicio del recorrido (turno y hora aproximada), "eres el siguiente", entregado y no entregado.
+- **No entregados**: reprogramar o cancelar.
+
 ## Cómo funciona
 
 ```
 Navegador (esta app) ──► Supabase (datos, inicio de sesión, permisos RLS)
         │
-        └──► n8n "HN - Panel acciones" ──► "HN - Comandos del equipo" (avisos al cliente)
+        ├──► Función "admin-usuarios" (crear usuarios y contraseñas)
+        └──► n8n "HN - Panel acciones" ──► "HN - Comandos del equipo" / "HN - Entregas" (avisos al cliente)
 n8n "HN - Hoja espejo Google Sheets" (6 a. m.) ──► Google Sheets (solo lectura)
 ```
 

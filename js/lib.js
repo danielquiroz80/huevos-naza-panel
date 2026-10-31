@@ -70,9 +70,67 @@ export const ESTADOS = {
   preparando: { label: 'Preparando', tone: 'blue' },
   en_camino: { label: 'En camino', tone: 'violet' },
   entregado: { label: 'Entregado', tone: 'green' },
-  cancelado: { label: 'Cancelado', tone: 'red' }
+  no_entregado: { label: 'No entregado', tone: 'red' },
+  cancelado: { label: 'Cancelado', tone: 'gray' }
 };
-export const ABIERTOS = ['pendiente', 'confirmado', 'preparando', 'en_camino'];
+export const ROLES = { dueno: 'Dueño', operador: 'Operador', repartidor: 'Repartidor' };
+export const MOTIVOS = {
+  cliente_ausente: 'No había nadie',
+  direccion: 'Dirección incorrecta o no encontrada',
+  rechazado: 'El cliente lo rechazó',
+  sin_tiempo: 'No alcanzó el tiempo',
+  otro: 'Otro'
+};
+export const DOMINIO_USUARIOS = 'huevosdelanaza.app';
+/** "carlos" -> "carlos@huevosdelanaza.app"; un correo se deja igual. */
+export function usuarioAEmail(u) {
+  const t = String(u || '').trim().toLowerCase();
+  return t.includes('@') ? t : t + '@' + DOMINIO_USUARIOS;
+}
+export const nombreUsuario = (email) => String(email || '').endsWith('@' + DOMINIO_USUARIOS) ? email.split('@')[0] : email;
+
+/** Gestión de usuarios (función segura de Supabase, solo dueño). */
+export async function usuarios(payload) {
+  const { data, error } = await sb.functions.invoke('admin-usuarios', { body: payload });
+  if (error) {
+    let m = error.message;
+    try { const j = await error.context.json(); m = j.mensaje || m; } catch (e) { /* sin cuerpo */ }
+    throw new Error(m);
+  }
+  if (data && data.ok === false) throw new Error(data.mensaje);
+  return data;
+}
+
+/** Ubicación actual del teléfono (o null si no se puede). */
+export function ubicacionActual(timeout = 9000) {
+  return new Promise((res) => {
+    if (!navigator.geolocation) return res(null);
+    navigator.geolocation.getCurrentPosition((p) => res({ lat: p.coords.latitude, lng: p.coords.longitude, precision: p.coords.accuracy }),
+      () => res(null), { enableHighAccuracy: true, timeout, maximumAge: 60000 });
+  });
+}
+
+/** Reduce una foto a ~1280 px en JPEG antes de subirla. */
+export async function comprimirFoto(file, max = 1280, calidad = 0.72) {
+  const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = URL.createObjectURL(file); });
+  const k = Math.min(1, max / Math.max(img.width, img.height));
+  const c = document.createElement('canvas'); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+  c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+  URL.revokeObjectURL(img.src);
+  return await new Promise((res) => c.toBlob(res, 'image/jpeg', calidad));
+}
+
+export function navegarLink(p, app = 'google') {
+  const dir = [p.direccion_entrega, p.barrio, p.municipio, 'Antioquia, Colombia'].filter(Boolean).join(', ');
+  if (app === 'waze') return p.lat ? `https://waze.com/ul?ll=${p.lat},${p.lng}&navigate=yes` : `https://waze.com/ul?q=${encodeURIComponent(dir)}&navigate=yes`;
+  return 'https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=' + encodeURIComponent(p.lat ? p.lat + ',' + p.lng : dir);
+}
+export function whatsappLink(tel, texto = '') {
+  let t = String(tel || '').replace(/\D/g, '');
+  if (t.length === 10) t = '57' + t;
+  return 'https://wa.me/' + t + (texto ? '?text=' + encodeURIComponent(texto) : '');
+}
+export const ABIERTOS = ['pendiente', 'confirmado', 'preparando', 'en_camino', 'no_entregado'];
 export const PAGOS = {
   pendiente: { label: 'Sin pagar', tone: 'amber' },
   parcial: { label: 'Pago parcial', tone: 'blue' },
@@ -85,12 +143,12 @@ export function mapsLink(p) {
   const dir = [p.direccion_entrega || p.direccion, p.barrio, p.municipio, 'Antioquia, Colombia'].filter(Boolean).join(', ');
   return 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(dir);
 }
-export function rutaLink(paradas) {
-  const d = paradas.map((p) => [p.direccion_entrega, p.barrio, p.municipio, 'Antioquia'].filter(Boolean).join(', '));
+export function rutaLink(paradas, origen) {
+  const d = paradas.map((p) => p.lat ? p.lat + ',' + p.lng : [p.direccion_entrega, p.barrio, p.municipio, 'Antioquia'].filter(Boolean).join(', '));
   if (!d.length) return null;
   const destino = d[d.length - 1];
   const intermedias = d.slice(0, -1).slice(0, 9);
-  return 'https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=' + encodeURIComponent(destino) +
+  return 'https://www.google.com/maps/dir/?api=1&travelmode=driving' + (origen && origen.lat ? '&origin=' + origen.lat + ',' + origen.lng : '') + '&destination=' + encodeURIComponent(destino) +
     (intermedias.length ? '&waypoints=' + encodeURIComponent(intermedias.join('|')) : '');
 }
 

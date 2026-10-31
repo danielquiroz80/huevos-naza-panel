@@ -1,5 +1,5 @@
 import { html, useState, useMemo, Icon, Badge, Card, Tabs, SearchBox, Loader, Empty, ErrorBox, Drawer, Modal, Field, AsyncButton, useAsync, toast } from '../ui.js';
-import { sb, q, money, num, fecha, fechaCorta, fechaHora, fechaLarga, ESTADOS, PAGOS, ABIERTOS, METODOS, norm, sum, mapsLink, rutaLink, accion, hoyISO } from '../lib.js';
+import { sb, q, money, num, fecha, fechaCorta, fechaHora, fechaLarga, ESTADOS, PAGOS, ABIERTOS, METODOS, MOTIVOS, norm, sum, mapsLink, rutaLink, accion, hoyISO, isoDate, sumarDias } from '../lib.js';
 
 export function EstadoBadge({ e }) { const x = ESTADOS[e] || { label: e, tone: 'gray' }; return html`<${Badge} tone=${x.tone}>${x.label}<//>`; }
 export function PagoBadge({ e }) { const x = PAGOS[e] || { label: e || '—', tone: 'gray' }; return html`<${Badge} tone=${x.tone}>${x.label}<//>`; }
@@ -41,6 +41,7 @@ export function PedidoDrawer({ pedido, onClose, onChanged }) {
     footer=${abierto || p.pago_estado !== 'pagado' ? html`<div class="actions-grid">
       ${['pendiente', 'confirmado', 'preparando'].includes(p.estado) && html`<button class="btn violet" onClick=${() => setDlg({ t: 'encamino' })}><${Icon} n="truck" size=${16} />En camino</button>`}
       ${p.estado === 'en_camino' && html`<button class="btn green" onClick=${() => setDlg({ t: 'entregado' })}><${Icon} n="check" size=${16} />Entregado</button>`}
+      ${p.estado === 'no_entregado' && html`<button class="btn primary" onClick=${() => setDlg({ t: 'reprogramar', fecha: isoDate(sumarDias(new Date(), 1)) })}><${Icon} n="calendar" size=${16} />Reprogramar</button>`}
       ${p.estado !== 'cancelado' && p.pago_estado !== 'pagado' && html`<button class="btn" onClick=${() => setDlg({ t: 'pago', monto: Math.max(0, (Number(p.total) || 0) - pagado), metodo: p.metodo_pago && METODOS.includes(p.metodo_pago) ? p.metodo_pago : 'efectivo' })}><${Icon} n="wallet" size=${16} />Registrar pago</button>`}
       ${abierto && html`<button class="btn danger-ghost" onClick=${() => setDlg({ t: 'cancelar', motivo: '' })}><${Icon} n="x" size=${16} />Cancelar</button>`}
     </div>` : null}>
@@ -50,6 +51,7 @@ export function PedidoDrawer({ pedido, onClose, onChanged }) {
       ${p.puede_modificar && html`<${Badge} tone="gray">Modificable hasta ${fechaHora(p.limite_modificacion)}<//>`}
     </div>
 
+    ${p.estado === 'no_entregado' && html`<div class="warn"><${Icon} n="alert" size=${16} />No se entregó: ${MOTIVOS[p.motivo_no_entrega] || 'sin motivo'}. Reprográmalo o cancélalo.</div>`}
     <div class="detail-block">
       <div class="detail-title"><${Icon} n="users" size=${16} />Cliente</div>
       <b>${p.cliente || '—'}</b>
@@ -100,6 +102,11 @@ export function PedidoDrawer({ pedido, onClose, onChanged }) {
       <${AsyncButton} className="btn danger" icon="x" onClick=${() => ejecutar({ accion: 'cancelar', pedido_id: p.id, motivo: dlg.motivo }, 'Pedido cancelado')}>Cancelar pedido<//>`}>
       <p>El stock vuelve al inventario y se le avisa al cliente.</p>
       <${Field} label="Motivo (opcional, lo ve el cliente)"><textarea class="input" rows="3" value=${dlg.motivo} onInput=${(e) => setDlg({ ...dlg, motivo: e.target.value })}></textarea><//><//>`}
+
+    ${dlg && dlg.t === 'reprogramar' && html`<${Modal} title=${'Reprogramar pedido #' + p.id} onClose=${() => setDlg(null)}
+      footer=${html`<button class="btn ghost" onClick=${() => setDlg(null)}>Volver</button>
+      <${AsyncButton} className="btn primary" icon="calendar" onClick=${async () => { await q(sb.rpc('panel_reprogramar', { p_pedido: p.id, p_fecha: dlg.fecha })); toast('Pedido reprogramado'); setDlg(null); onChanged && onChanged(); onClose(); }}>Reprogramar<//>`}>
+      <${Field} label="Nueva fecha de entrega"><input class="input" type="date" min=${hoyISO()} value=${dlg.fecha} onInput=${(e) => setDlg({ ...dlg, fecha: e.target.value })} /><//><//>`}
 
     ${dlg && dlg.t === 'verificar' && html`<${Modal} title="Verificar comprobante" onClose=${() => setDlg(null)}
       footer=${html`<button class="btn ghost" onClick=${() => setDlg(null)}>Volver</button>
