@@ -1076,3 +1076,10 @@ button.kpi { font: inherit; color: inherit; text-align: left; width: 100%; curso
 /* Evita que una fila ancha (pestañas, tablas) ensanche toda la pantalla en el celular */
 .stack { grid-template-columns: minmax(0, 1fr); }
 .toolbar > .tabs { min-width: 0; }
+
+/* Repartidor no habilitado */
+.no-hab { display: grid; justify-items: center; text-align: center; gap: 10px; padding: 10px 4px; }
+.no-hab h3 { font-size: 19px; margin: 4px 0 0; }
+.no-hab p { max-width: 340px; margin: 0; line-height: 1.5; }
+.no-hab-ico { width: 58px; height: 58px; border-radius: 18px; display: grid; place-items: center; background: var(--amber-soft); color: #B07800; }
+.hab-card { border: 2px solid var(--violet); }

@@ -4,16 +4,17 @@ import { PedidoItem, PedidoDrawer, EstadoBadge } from './pedidos.js';
 
 async function cargar() {
   const hoy = hoyISO();
-  const [semanas, abiertos, inventario, consolidado, pagosPend, solicitudes, zonasNR] = await Promise.all([
+  const [semanas, abiertos, inventario, consolidado, pagosPend, solicitudes, zonasNR, habs] = await Promise.all([
     q(sb.from('v_ventas_semana').select('*').order('semana', { ascending: false }).limit(10)),
     q(sb.from('v_pedidos').select('*').in('estado', ABIERTOS).order('fecha_entrega')),
     q(sb.from('v_inventario').select('*').order('nombre')),
     q(sb.from('v_consolidado').select('*').gte('fecha_entrega', hoy).order('fecha_entrega')),
     q(sb.from('pagos').select('id,pedido_id,monto,created_at').eq('estado', 'pendiente')),
     q(sb.from('v_solicitudes_abiertas').select('id,tipo,cliente,created_at')),
-    q(sb.from('zonas_no_reconocidas').select('id', { count: 'exact', head: false }).eq('resuelto', false).limit(200))
+    q(sb.from('zonas_no_reconocidas').select('id', { count: 'exact', head: false }).eq('resuelto', false).limit(200)),
+    sb.rpc('panel_habilitaciones', { p_fecha: null }).then((x) => x.data || [], () => [])
   ]);
-  return { semanas, abiertos, inventario, consolidado, pagosPend, solicitudes, zonasNR };
+  return { semanas, abiertos, inventario, consolidado, pagosPend, solicitudes, zonasNR, habs };
 }
 
 export function Inicio({ perfil }) {
@@ -40,6 +41,8 @@ export function Inicio({ perfil }) {
     else if (disp <= 3) alertas.push({ tone: 'amber', icon: 'box', t: `${p.nombre}: quedan ${disp} disponibles`, href: '#/productos' });
     if (p.en_lista_espera > 0 && p.stock > 0) alertas.push({ tone: 'blue', icon: 'bell', t: `${p.en_lista_espera} clientes esperan ${p.nombre}`, href: '#/productos' });
   }
+  const habPend = (d.habs || []).filter((x) => x.estado === 'solicitada');
+  if (habPend.length) alertas.push({ tone: 'violet', icon: 'idcard', t: `${habPend.length} repartidor(es) piden ser habilitados para repartir`, href: '#/entregas' });
   if (d.pagosPend.length) alertas.push({ tone: 'amber', icon: 'wallet', t: `${d.pagosPend.length} comprobante(s) de pago por verificar`, href: '#/pedidos' });
   if (d.solicitudes.length) alertas.push({ tone: 'violet', icon: 'chat', t: `${d.solicitudes.length} caso(s) de clientes abiertos`, href: '#/negocio' });
   if (d.zonasNR.length) alertas.push({ tone: 'gray', icon: 'pin', t: `${d.zonasNR.length} barrio(s) que el bot no reconoció`, href: '#/negocio' });
