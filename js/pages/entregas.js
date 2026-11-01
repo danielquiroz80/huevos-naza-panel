@@ -1,4 +1,4 @@
-import { html, useState, useEffect, useRef, Icon, Card, Kpi, Tabs, Loader, Empty, ErrorBox, Modal, Field, AsyncButton, Badge, Meter, Drawer, SearchBox, useAsync, toast } from '../ui.js';
+import { html, useState, useEffect, useRef, Icon, Card, Kpi, Tabs, Loader, Empty, ErrorBox, Modal, Field, AsyncButton, Badge, Meter, Drawer, SearchBox, useAsync, toast, Atras } from '../ui.js';
 import { sb, q, num, money, fechaLarga, fechaCorta, fechaHora, hoyISO, isoDate, sumarDias, sum, accion, rutaLink, navegarLink, whatsappLink,
   ubicacionActual, comprimirFoto, MOTIVOS, nombreUsuario, norm, ESTADOS } from '../lib.js';
 import { Mapa, MapaRutas, COLORES_RUTA } from '../mapa.js';
@@ -324,11 +324,12 @@ export function Entregas({ perfil }) {
   const [tab, setTab] = useState('panel');
   const [verRuta, setVerRuta] = useState(null);
   const [detalle, setDetalle] = useState(null);
-  if (verRuta) return html`<div class="stack"><button class="btn ghost back" onClick=${() => setVerRuta(null)}><${Icon} n="down2" size=${16} />Volver</button>
+  if (verRuta) return html`<div class="stack"><${Atras} onAtras=${() => setVerRuta(null)} /><button class="btn ghost back" onClick=${() => history.back()}><${Icon} n="back" size=${16} />Volver</button>
     <${MiRuta} perfil=${perfil} rutaId=${verRuta} /></div>`;
   const [verHab, setVerHab] = useState(0);
   return html`<div class="stack">
     <${SolicitudesHab} onCambio=${() => setVerHab(verHab + 1)} />
+    ${tab !== 'panel' && html`<${Atras} key=${tab} onAtras=${() => setTab('panel')} />`}
     <div class="toolbar sticky-tabs"><${Tabs} value=${tab} onChange=${setTab} items=${[{ v: 'panel', label: 'Panel' }, { v: 'rutas', label: 'Rutas' }, { v: 'pedidos', label: 'Pedidos' }, { v: 'planear', label: 'Planear' }]} /></div>
     ${tab === 'panel' && html`<${EnVivo} onVer=${setDetalle} onPlanear=${() => setTab('planear')} onPedidos=${() => setTab('pedidos')} onRutas=${() => setTab('rutas')} />`}
     ${tab === 'rutas' && html`<${RutasLista} onVer=${setDetalle} />`}
@@ -982,6 +983,7 @@ export function MiRuta({ perfil, rutaId }) {
   const [k, setK] = useState(0);
   if (rutaId) return html`<${RutaActiva} perfil=${perfil} rutaId=${rutaId} />`;
   return html`<div class="stack">
+    ${tab !== 'ruta' && html`<${Atras} key=${tab} onAtras=${() => setTab('ruta')} />`}
     <div class="toolbar sticky-tabs"><${Tabs} value=${tab} onChange=${setTab} items=${[{ v: 'ruta', label: 'Mi ruta' }, { v: 'disponibles', label: 'Disponibles' }, { v: 'historial', label: 'Historial' }]} /></div>
     ${tab === 'ruta' && html`<${RutaActiva} key=${k} perfil=${perfil} onDisponibles=${() => setTab('disponibles')} />`}
     ${tab === 'disponibles' && html`<${TomarPedidos} perfil=${perfil} onListo=${() => { setK(k + 1); setTab('ruta'); }} />`}

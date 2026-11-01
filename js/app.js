@@ -1,5 +1,5 @@
 import { render } from 'https://esm.sh/htm@3.1.1/preact/standalone';
-import { html, useState, useEffect, Icon, Toaster, toast, AsyncButton, Field, Modal, useArrastre } from './ui.js';
+import { html, useState, useEffect, Icon, Toaster, toast, AsyncButton, Field, Modal, useArrastre, useAtras } from './ui.js';
 import { sb, q, CONFIG, ROLES, nombreUsuario, claveInvalida, REGLAS_CLAVE, DOMINIO_USUARIOS, dispositivo, registrarEvento, salir } from './lib.js';
 import { bioDisponible, bioConfig, bioActivar, bioVerificar, bioDesactivar, desbloqueado, bloquear } from './bio.js';
 import { Inicio } from './pages/inicio.js';
@@ -209,11 +209,13 @@ function MiCuenta({ perfil, onClose }) {
 }
 
 /* ---------- Estructura principal ---------- */
+const visitas = [];
 function Shell({ session, perfil }) {
   useEffect(() => { if (perfil.rol === 'repartidor') iniciarRastreo(perfil.email); }, []);
   const rutas = TODAS.filter((r) => r.roles.includes(perfil.rol));
   const movil = MOVIL[perfil.rol] || [];
   const [ruta, setRuta] = useState(rutaActual(rutas));
+  if (!visitas.length) visitas.push(rutaActual(rutas));
   const [mas, setMas] = useState(false);
   const [cuenta, setCuenta] = useState(false);
   const [instalar, setInstalar] = useState(null);
@@ -223,7 +225,7 @@ function Shell({ session, perfil }) {
   const cerrarOferta = () => { localStorage.setItem('naza_bio_ofrecido', '1'); setOferta(false); };
 
   useEffect(() => {
-    const f = () => { setRuta(rutaActual(rutas)); setMas(false); window.scrollTo({ top: 0 }); };
+    const f = () => { const id = rutaActual(rutas); if (visitas[visitas.length - 2] === id) visitas.pop(); else if (visitas[visitas.length - 1] !== id) visitas.push(id); setRuta(id); setMas(false); window.scrollTo({ top: 0 }); };
     window.addEventListener('hashchange', f);
     const bip = (e) => { e.preventDefault(); setInstalar(e); };
     window.addEventListener('beforeinstallprompt', bip);
@@ -231,6 +233,7 @@ function Shell({ session, perfil }) {
   }, []);
 
   const R = rutas.find((r) => r.id === ruta) || rutas[0];
+  const atras = () => { if (visitas.length > 1) history.back(); else location.hash = '#/' + rutas[0].id; };
   const Page = R.C;
   const nombre = perfil.nombre || nombreUsuario(session.user.email);
   const extras = rutas.filter((r) => !movil.includes(r.id));
@@ -249,8 +252,8 @@ function Shell({ session, perfil }) {
 
     <main class="main">
       <header class="topbar">
-        <div class="topbar-brand"><img src="assets/logo.png" alt="" /><b>${R.label}</b></div>
-        <h1 class="page-title">${R.label}</h1>
+        <div class="topbar-brand">${R.id !== rutas[0].id ? html`<button class="icon-btn atras" onClick=${atras} aria-label="Atrás"><${Icon} n="back" /></button>` : html`<img src="assets/logo.png" alt="" />`}<b>${R.label}</b></div>
+        <h1 class="page-title">${R.id !== rutas[0].id && html`<button class="icon-btn atras" onClick=${atras} aria-label="Atrás"><${Icon} n="back" /></button>`}${R.label}</h1>
         <div class="topbar-actions">
           <button class="icon-btn" title="Actualizar" aria-label="Actualizar datos" onClick=${() => { setTick((t) => t + 1); toast('Datos actualizados'); }}><${Icon} n="refresh" /></button>
           <button class="avatar-btn only-mobile" title="Mi cuenta" aria-label="Mi cuenta" onClick=${() => setCuenta(true)}><span class="avatar sm">${nombre.slice(0, 1).toUpperCase()}</span></button>
@@ -285,6 +288,7 @@ const DESC_MAS = { reportes: 'Informes y descargas', consejos: 'Ideas para mejor
   clientes: 'Quién compra y qué', compras: 'Canastas, gasolina, alimento y otros gastos', planeacion: 'Qué alistar la próxima semana', negocio: 'Zonas, equipo y configuración',
   repartidores: 'Equipo de reparto', pedidos: 'Todos los pedidos', entregas: 'Rutas y reparto', inicio: 'Resumen del día' };
 function MenuMas({ extras, actual, instalar, onInstalar, onClose }) {
+  useAtras(onClose);
   const arr = useArrastre(onClose);
   useEffect(() => { document.body.classList.add('no-scroll'); return () => document.body.classList.remove('no-scroll'); }, []);
   const usados = new Set();
@@ -296,7 +300,7 @@ function MenuMas({ extras, actual, instalar, onInstalar, onClose }) {
       <div class="sheet-grab"></div>
       <div class="sheet-scroll">
         ${grupos.map((g) => html`<div key=${g.t} class="sheet-grupo"><span class="sheet-tit">${g.t}</span>
-          <div class="sheet-lista">${g.items.map((r) => html`<a key=${r.id} href=${'#/' + r.id} class=${'sheet-fila' + (r.id === actual ? ' on' : '')} onClick=${onClose}>
+          <div class="sheet-lista">${g.items.map((r) => html`<a key=${r.id} href=${'#/' + r.id} class=${'sheet-fila' + (r.id === actual ? ' on' : '')} onClick=${(e) => { if (r.id === actual) { e.preventDefault(); onClose(); } }}>
             <span class="sheet-ico"><${Icon} n=${r.icon} size=${20} /></span><span class="sheet-txt"><b>${r.label}</b><small>${DESC_MAS[r.id] || ''}</small></span><${Icon} n="chevron" size=${16} /></a>`)}</div></div>`)}
         ${instalar && html`<button class="btn ghost block" onClick=${onInstalar}><${Icon} n="download" size=${16} />Instalar app en este teléfono</button>`}
         <p class="sheet-tip">Desliza hacia abajo para cerrar</p>

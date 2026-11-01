@@ -32,6 +32,7 @@ const P = {
   mail: '<rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>',
   clock: '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
   egg: '<path d="M12 22c6.23-.05 7.87-5.57 7.5-10-.36-4.34-3.95-9.96-7.5-10-3.55.04-7.14 5.66-7.5 10-.37 4.43 1.27 9.95 7.5 10z"/>',
+  back: '<path d="m15 18-6-6 6-6"/>',
   spark: '<path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/>',
   history: '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/>',
   external: '<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
@@ -171,6 +172,32 @@ export function SearchBox({ value, onInput, placeholder = 'Buscar…' }) {
     <input type="search" value=${value} placeholder=${placeholder} onInput=${(e) => onInput(e.target.value)} /></label>`;
 }
 
+/* ---------- Botón "atrás" del teléfono ----------
+   Cada ventana, panel o vista interna que se abre agrega un paso al historial del navegador.
+   Así, el botón o gesto "atrás" del teléfono cierra primero lo que esté abierto, en vez de salir de la sección. */
+const capas = [];
+let ignorarPop = 0, sigCapa = 1;
+window.addEventListener('popstate', () => {
+  if (ignorarPop > 0) { ignorarPop--; return; }
+  const c = capas.pop();
+  if (c) { c.porAtras = true; c.cerrar(); return; }
+  if (history.state && history.state.capa) { ignorarPop++; history.back(); } // paso viejo de una ventana ya cerrada
+});
+export function useAtras(onAtras) {
+  const ref = useRef(onAtras); ref.current = onAtras;
+  useEffect(() => {
+    const c = { id: sigCapa++, porAtras: false, cerrar: () => ref.current && ref.current() };
+    capas.push(c);
+    history.pushState({ capa: c.id }, '');
+    return () => {
+      const i = capas.indexOf(c); if (i >= 0) capas.splice(i, 1);
+      if (!c.porAtras && history.state && history.state.capa === c.id) { ignorarPop++; history.back(); }
+    };
+  }, []);
+}
+/** Componente sin dibujo: mientras esté montado, "atrás" ejecuta onAtras. */
+export function Atras({ onAtras }) { useAtras(onAtras); return null; }
+
 /** Permite cerrar un panel inferior arrastrándolo hacia abajo (celular). */
 export function useArrastre(onClose) {
   const ref = useRef(null), st = useRef(null);
@@ -200,6 +227,7 @@ export function useArrastre(onClose) {
 }
 
 export function Modal({ title, onClose, children, footer, wide }) {
+  useAtras(onClose);
   useEffect(() => {
     const k = (e) => e.key === 'Escape' && onClose();
     window.addEventListener('keydown', k);
@@ -218,6 +246,7 @@ export function Modal({ title, onClose, children, footer, wide }) {
 }
 
 export function Drawer({ title, sub, onClose, children, footer }) {
+  useAtras(onClose);
   useEffect(() => {
     const k = (e) => e.key === 'Escape' && onClose();
     window.addEventListener('keydown', k);
@@ -226,7 +255,7 @@ export function Drawer({ title, sub, onClose, children, footer }) {
   }, []);
   return html`<div class="overlay drawer-overlay" onClick=${(e) => e.target === e.currentTarget && onClose()}>
     <aside class="drawer" role="dialog" aria-modal="true" aria-label=${title}>
-      <div class="drawer-head"><div><h3>${title}</h3>${sub && html`<span class="muted">${sub}</span>`}</div>
+      <div class="drawer-head"><button class="icon-btn drawer-atras" onClick=${onClose} aria-label="Atrás"><${Icon} n="back" /></button><div class="drawer-tit"><h3>${title}</h3>${sub && html`<span class="muted">${sub}</span>`}</div>
         <button class="icon-btn" onClick=${onClose} aria-label="Cerrar"><${Icon} n="x" /></button></div>
       <div class="drawer-body">${children}</div>
       ${footer && html`<div class="drawer-foot">${footer}</div>`}
