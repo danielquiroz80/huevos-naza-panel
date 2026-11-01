@@ -177,21 +177,20 @@ export function Pedidos() {
   const linkRuta = dia && ruta.data ? rutaLink(ruta.data.filter((p) => ['confirmado', 'preparando', 'en_camino', 'pendiente'].includes(p.estado))) : null;
 
   return html`<div class="stack">
-    <div class="toolbar">
-      <${Tabs} value=${tab} onChange=${setTab} items=${[
-        { v: 'abiertos', label: 'Abiertos', n: cuenta.abiertos },
-        { v: 'por_cobrar', label: 'Por cobrar', n: cuenta.por_cobrar },
-        { v: 'entregados', label: 'Entregados', n: cuenta.entregados },
-        { v: 'cancelados', label: 'Cancelados', n: cuenta.cancelados },
-        { v: 'todos', label: 'Todos', n: cuenta.todos }]} />
-    </div>
-    <div class="toolbar">
-      <${SearchBox} value=${texto} onInput=${setTexto} placeholder="Buscar por cliente, número, barrio o producto" />
-      <select class="input auto" value=${dia} onChange=${(e) => setDia(e.target.value)} aria-label="Día de entrega">
-        <option value="">Todas las entregas</option>
-        ${fechas.map((f) => html`<option value=${f}>${fechaCorta(f)}${f === hoyISO() ? ' (hoy)' : ''}</option>`)}
-      </select>
-      ${linkRuta && html`<a class="btn" href=${linkRuta} target="_blank" rel="noopener"><${Icon} n="truck" size=${16} />Ruta en Maps</a>`}
+    <div class="filtros">
+      <div class="filtro-estados" role="tablist" aria-label="Qué pedidos ver">
+        ${[['abiertos', 'Activos', cuenta.abiertos], ['por_cobrar', 'Por cobrar', cuenta.por_cobrar], ['entregados', 'Entregados', cuenta.entregados], ['cancelados', 'Cancelados', cuenta.cancelados], ['todos', 'Todos', cuenta.todos]]
+          .map(([v, l, n]) => html`<button key=${v} role="tab" aria-selected=${tab === v} class=${'fe' + (tab === v ? ' on' : '')} onClick=${() => setTab(v)}><b>${num(n)}</b><span>${l}</span></button>`)}
+      </div>
+      <${SearchBox} value=${texto} onInput=${setTexto} placeholder="Buscar cliente, número, barrio o producto" />
+      ${fechas.length > 0 && html`<div class="filtro-dias">
+        <span class="fd-tit">Día de entrega</span>
+        <div class="chips scroll-x">
+          <button class=${'chip-b' + (!dia ? ' on' : '')} onClick=${() => setDia('')}>Todos</button>
+          ${fechas.map((f) => html`<button key=${f} class=${'chip-b' + (dia === f ? ' on' : '')} onClick=${() => setDia(dia === f ? '' : f)}>${fechaCorta(f)}${f === hoyISO() ? ' · hoy' : ''}</button>`)}
+        </div>
+      </div>`}
+      ${linkRuta && html`<a class="btn sm" href=${linkRuta} target="_blank" rel="noopener"><${Icon} n="truck" size=${16} />Ver la ruta de ese día en Google Maps</a>`}
     </div>
 
     <div class="summary-strip">

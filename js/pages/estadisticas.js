@@ -1,17 +1,19 @@
-import { html, useState, useMemo, Card, Kpi, Bars, HBars, Donut, Loader, ErrorBox, Tabs, useAsync } from '../ui.js';
-import { sb, q, money, moneyShort, num, fecha, sum, groupBy, lunesDe, sumarDias, isoDate, parseDate } from '../lib.js';
+import { html, useState, useMemo, Card, Kpi, Bars, HBars, Donut, Loader, ErrorBox, Icon, useAsync } from '../ui.js';
+import { sb, q, money, moneyShort, num, fecha, fechaLarga, sum, groupBy, lunesDe, sumarDias, isoDate, parseDate } from '../lib.js';
 
 const COLORES = { pendiente: '#F7B016', confirmado: '#3E6FB6', preparando: '#6E8FD0', en_camino: '#7B5CC4', entregado: '#2E9E6A', cancelado: '#E2463C' };
 const ETQ = { pendiente: 'Pendiente', confirmado: 'Confirmado', preparando: 'Preparando', en_camino: 'En camino', entregado: 'Entregado', cancelado: 'Cancelado' };
 
 export function Estadisticas() {
   const [rango, setRango] = useState(8);
+  const [desdeC, setDesdeC] = useState(isoDate(sumarDias(new Date(), -55)));
+  const [hastaC, setHastaC] = useState(isoDate(new Date()));
   const r = useAsync(async () => {
     const [semanas, prod, zonas, pedidos, clientes] = await Promise.all([
       q(sb.from('v_ventas_semana').select('*').order('semana', { ascending: false }).limit(60)),
       q(sb.from('v_ventas_producto').select('*').order('semana', { ascending: false }).limit(2000)),
       q(sb.from('v_ventas_zona').select('*').order('ventas', { ascending: false }).limit(300)),
-      q(sb.from('pedidos').select('id,estado,fecha_entrega,created_at,total,municipio').order('created_at', { ascending: false }).limit(5000)),
+      q(sb.from('pedidos').select('id,estado,fecha_entrega,created_at,total,municipio,barrio,cliente_id').order('created_at', { ascending: false }).limit(5000)),
       q(sb.from('clientes').select('id,created_at').limit(5000))
     ]);
     return { semanas, prod, zonas, pedidos, clientes };
@@ -20,10 +22,13 @@ export function Estadisticas() {
 
   const c = useMemo(() => {
     if (!d) return null;
-    const desde = lunesDe(sumarDias(new Date(), -7 * (rango - 1)));
-    const sem = d.semanas.filter((s) => s.semana >= desde).reverse();
-    const prod = d.prod.filter((s) => s.semana >= desde);
-    const ped = d.pedidos.filter((p) => isoDate(p.created_at) >= desde);
+    const hasta = rango === 'c' ? hastaC : isoDate(new Date());
+    const desde = rango === 'c' ? lunesDe(desdeC) : lunesDe(sumarDias(new Date(), -7 * (rango - 1)));
+    const desdeDia = rango === 'c' ? desdeC : desde;
+    const sem = d.semanas.filter((s) => s.semana >= desde && s.semana <= hasta).reverse();
+    const prod = d.prod.filter((s) => s.semana >= desde && s.semana <= hasta);
+    const ped = d.pedidos.filter((p) => p.fecha_entrega && p.fecha_entrega >= desdeDia && p.fecha_entrega <= hasta);
+    const vend = ped.filter((p) => p.estado !== 'cancelado');
     const ventas = sum(sem, 'ventas');
     const entregados = sum(sem, 'pedidos_entregados');
     const totalPed = sum(sem, 'pedidos');
@@ -34,8 +39,9 @@ export function Estadisticas() {
       return { label: k, canastas: sum(v, 'canastas'), ventas: vt, margen: mg, pm: vt ? Math.round((mg / vt) * 100) : null };
     }).sort((a, b) => b.ventas - a.ventas);
 
-    const porMunicipio = [...groupBy(d.zonas, (z) => z.municipio || 'Sin municipio').entries()].map(([k, v]) => ({ label: k, v: sum(v, 'ventas'), sub: num(sum(v, 'pedidos')) + ' pedidos · ' + num(sum(v, 'clientes')) + ' clientes' })).sort((a, b) => b.v - a.v);
-    const porBarrio = d.zonas.filter((z) => z.barrio).slice(0, 8).map((z) => ({ label: z.barrio + (z.municipio ? ' · ' + z.municipio : ''), v: Number(z.ventas) || 0, sub: num(z.pedidos) + ' pedidos' }));
+    const zona = (lista, f) => [...groupBy(lista, f).entries()].map(([k, v]) => ({ label: k, v: sum(v, 'total'), sub: num(v.length) + ' pedidos · ' + num(new Set(v.map((p) => p.cliente_id)).size) + ' clientes' })).sort((a, b) => b.v - a.v);
+    const porMunicipio = zona(vend, (p) => p.municipio || 'Sin municipio');
+    const porBarrio = zona(vend.filter((p) => p.barrio), (p) => p.barrio + (p.municipio ? ' · ' + p.municipio : '')).slice(0, 8);
 
     const estados = Object.keys(ETQ).map((k) => ({ label: ETQ[k], v: ped.filter((p) => p.estado === k).length, color: COLORES[k] }));
     const dias = [...groupBy(ped.filter((p) => p.fecha_entrega && p.estado !== 'cancelado'), (p) => parseDate(p.fecha_entrega).toLocaleDateString('es-CO', { weekday: 'long' })).entries()]
@@ -43,25 +49,34 @@ export function Estadisticas() {
 
     const nuevosPorSemana = groupBy(d.clientes, (x) => lunesDe(x.created_at));
     const nuevos = [];
-    for (let i = rango - 1; i >= 0; i--) { const k = lunesDe(sumarDias(new Date(), -7 * i)); nuevos.push({ k, label: fecha(k), v: (nuevosPorSemana.get(k) || []).length, hl: i === 0 }); }
+    for (let k = desde; k <= hasta; k = isoDate(sumarDias(parseDate(k), 7))) { nuevos.push({ k, label: fecha(k), v: (nuevosPorSemana.get(k) || []).length, hl: k === lunesDe(hasta) }); }
 
     return {
-      ventas, entregados, totalPed, cancel,
+      ventas, entregados, totalPed, cancel, desde: desdeDia, hasta, semanas: sem.length,
       ticket: entregados ? ventas / Math.max(totalPed - cancel, 1) : (sem.length ? sum(sem, 'ticket_promedio') / sem.length : 0),
       canastas: sum(sem, 'canastas'),
       barrasVentas: sem.map((s, i) => ({ k: s.semana, label: fecha(s.semana), v: Number(s.ventas) || 0, hl: i === sem.length - 1, tip: `${num(s.pedidos)} pedidos · ${num(s.canastas)} canastas` })),
       porProd, porMunicipio, porBarrio, estados, dias, nuevos
     };
-  }, [d, rango]);
+  }, [d, rango, desdeC, hastaC]);
 
   return html`<div class="stack">
-    <div class="toolbar">
-      <${Tabs} value=${rango} onChange=${setRango} items=${[{ v: 4, label: '4 semanas' }, { v: 8, label: '8 semanas' }, { v: 12, label: '3 meses' }, { v: 26, label: '6 meses' }, { v: 52, label: '1 año' }]} />
-    </div>
+    <${Card} className="periodo-card">
+      <div class="periodo">
+        <span class="fd-tit">¿Qué periodo quieres analizar?</span>
+        <div class="chips">${[[4, '4 semanas'], [8, '8 semanas'], [13, '3 meses'], [26, '6 meses'], [52, '1 año'], ['c', 'Elegir fechas']].map(([v, l]) =>
+          html`<button key=${v} class=${'chip-b' + (rango === v ? ' on' : '')} onClick=${() => setRango(v)}>${v === 'c' ? html`<${Icon} n="calendar" size=${13} />` : null}${l}</button>`)}</div>
+        ${rango === 'c' && html`<div class="periodo-fechas">
+          <label class="field"><span class="field-label">Desde</span><input class="input" type="date" value=${desdeC} max=${hastaC} onChange=${(e) => e.target.value && setDesdeC(e.target.value)} /></label>
+          <label class="field"><span class="field-label">Hasta</span><input class="input" type="date" value=${hastaC} min=${desdeC} onChange=${(e) => e.target.value && setHastaC(e.target.value)} /></label>
+        </div>`}
+        ${c && html`<span class="periodo-res">Mostrando del <b>${fechaLarga(c.desde)}</b> al <b>${fechaLarga(c.hasta)}</b> · ${num(c.semanas)} semana(s) con ventas</span>`}
+      </div>
+    <//>
     <${ErrorBox} error=${r.error} onRetry=${r.reload} />
     ${!c ? html`<${Loader} rows=${6} />` : html`
       <div class="kpis">
-        <${Kpi} icon="wallet" label="Ventas" value=${moneyShort(c.ventas)} sub=${'últimas ' + rango + ' semanas'} />
+        <${Kpi} icon="wallet" label="Ventas" value=${moneyShort(c.ventas)} sub=${'en ' + num(c.totalPed) + ' pedidos'} />
         <${Kpi} icon="egg" label="Canastas vendidas" value=${num(c.canastas)} tone="blue" />
         <${Kpi} icon="pedidos" label="Promedio por pedido" value=${money(c.ticket)} tone="violet" />
         <${Kpi} icon="x" label="Cancelación" value=${c.totalPed ? Math.round((c.cancel / c.totalPed) * 100) + '%' : '—'} sub=${num(c.cancel) + ' de ' + num(c.totalPed)} tone="red" />

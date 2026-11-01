@@ -71,8 +71,8 @@ export function Inicio({ perfil }) {
     </div>
 
     <div class="grid-2">
-      <${Card} title="Calendario de ventas" icon="calendar" action=${html`<button class="link" onClick=${() => setDet('ventas')}>Ver todas</button>`}>
-        <${CalendarioVentas} semanas=${d.semanas} diarios=${d.diarios} filas=${5} />
+      <${Card} title="Ventas por semana" icon="calendar" action=${html`<button class="link" onClick=${() => setDet('ventas')}>Ver más semanas</button>`}>
+        <${CalendarioVentas} semanas=${d.semanas} diarios=${d.diarios} filas=${3} />
       <//>
       <${Card} title="Pendientes" icon="bell">
         ${alertas.length === 0 ? html`<p class="todo-ok"><${Icon} n="check" size=${16} />Todo al día: no hay nada pendiente.</p>` :
@@ -105,7 +105,7 @@ function DetalleKpi({ tipo, d, onClose, onPedido }) {
     <div class="ri-main"><b>#${p.id} · ${p.cliente || 'Cliente'}</b><span class="ri-meta">${fechaCorta(p.fecha_entrega)} · ${num(p.canastas)} can. · ${[p.barrio, p.municipio].filter(Boolean).join(', ')}</span></div>
     <div class="row-btns"><b>${valor ? valor(p) : money(p.total)}</b><${EstadoBadge} e=${p.estado} /></div></button>`)}</div>` : html`<${Empty} icon="check" title="No hay pedidos aquí" />`;
   if (tipo === 'ventas') {
-    return html`<${Modal} wide title="Calendario de ventas" onClose=${onClose}>
+    return html`<${Modal} wide title="Ventas por semana" onClose=${onClose}>
       <${CalendarioVentas} semanas=${d.semanas} diarios=${d.diarios} filas=${10} />
       <a class="btn ghost block" href="#/estadisticas" onClick=${onClose}><${Icon} n="chart" size=${16} />Ver estadísticas completas</a>
     <//>`;
@@ -147,39 +147,37 @@ const mayus = (t) => t.charAt(0).toUpperCase() + t.slice(1);
 const iso = (d) => d.toISOString().slice(0, 10);
 const masDias = (f, n) => { const d = new Date(f + 'T12:00:00'); d.setDate(d.getDate() + n); return iso(d); };
 
-/** Calendario de ventas: cada fila es una semana (lunes a domingo). Toca un día o una semana para ver el detalle. */
-function CalendarioVentas({ semanas, diarios, filas = 5 }) {
+/** Ventas por semana: cada tarjeta es una semana (lunes a domingo) con su total y lo que se vendió cada día. */
+function CalendarioVentas({ semanas, diarios, filas = 3 }) {
   const porDia = new Map();
   for (const p of diarios || []) { const x = porDia.get(p.fecha_entrega) || { v: 0, n: 0, c: 0 }; x.v += Number(p.total) || 0; x.n += 1; x.c += Number(p.canastas) || 0; porDia.set(p.fecha_entrega, x); }
   const porSem = new Map((semanas || []).map((s) => [s.semana, s]));
   const lunesHoy = isoLunes(0), hoy = iso(new Date(new Date().setHours(12, 0, 0, 0)));
-  const filasSem = Array.from({ length: filas }, (_, i) => masDias(lunesHoy, -7 * i));
-  const maxDia = Math.max(1, ...[...porDia.values()].map((x) => x.v));
-  const [sel, setSel] = useState(() => ({ t: 'sem', k: lunesHoy }));
-  const detalle = sel.t === 'dia' ? porDia.get(sel.k) : porSem.get(sel.k);
-  const semAnt = sel.t === 'sem' ? porSem.get(masDias(sel.k, -7)) : null;
-  const t = semAnt && detalle ? variacion(detalle.ventas, semAnt.ventas) : null;
-  const titulo = sel.t === 'dia' ? mayus(new Date(sel.k + 'T12:00:00').toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long' })) : (sel.k === lunesHoy ? 'Esta semana · ' : 'Semana · ') + rangoSemana(sel.k);
-  const valor = detalle ? (sel.t === 'dia' ? detalle.v : Number(detalle.ventas)) : 0;
-  return html`<div class="cal">
-    <div class="cal-det">
-      <span class="cal-tit">${titulo}</span>
-      <div class="cal-valor"><${Contar} key=${sel.t + sel.k} value=${money(valor)} /></div>
-      ${!detalle ? html`<span class="cal-sub">No hubo ventas.</span>` : sel.t === 'dia'
-        ? html`<span class="cal-sub"><b>${num(detalle.n)}</b> pedidos · <b>${num(detalle.c)}</b> canastas</span>`
-        : html`<span class="cal-sub"><b>${num(detalle.pedidos)}</b> pedidos · <b>${num(detalle.canastas)}</b> canastas · en promedio <b>${money(detalle.ticket_promedio)}</b> por pedido
-            ${t != null && html` <em class=${t >= 0 ? 'up' : 'down'}><${Icon} n=${t >= 0 ? 'up' : 'down'} size=${12} />${Math.abs(t)}% vs. semana anterior</em>`}</span>`}
-    </div>
-    <div class="cal-grid" role="grid" aria-label="Ventas por día">
-      <span></span>${DIAS.map((x, i) => html`<span key=${i} class="cal-dow">${x}</span>`)}
-      ${filasSem.map((l) => { const s = porSem.get(l); return html`
-        <button key=${'s' + l} class=${'cal-sem' + (sel.t === 'sem' && sel.k === l ? ' on' : '')} onClick=${() => setSel({ t: 'sem', k: l })} aria-label=${'Semana ' + rangoSemana(l)}>
-          <b>${Number(l.slice(8))}</b><small>${new Date(l + 'T12:00:00').toLocaleDateString('es-CO', { month: 'short' }).replace('.', '')}</small></button>
-        ${DIAS.map((_, j) => { const f = masDias(l, j), x = porDia.get(f), fut = f > hoy;
-          return html`<button key=${f} class=${'cal-dia' + (x ? ' con' : '') + (f === hoy ? ' hoy' : '') + (fut ? ' fut' : '') + (sel.t === 'dia' && sel.k === f ? ' on' : '')}
-            style=${x ? { '--i': (0.25 + 0.75 * (x.v / maxDia)).toFixed(2) } : null} disabled=${!x} onClick=${() => setSel({ t: 'dia', k: f })}
-            aria-label=${f + (x ? ': ' + money(x.v) : ': sin ventas')}><span>${Number(f.slice(8))}</span></button>`; })}`; })}
-    </div>
-    <p class="cal-ayuda">Los días de color tuvieron ventas: más oscuro, más ventas. Toca un día para ver sus ventas, o la fecha de la izquierda para ver la semana completa.</p>
+  const lista = Array.from({ length: filas }, (_, i) => masDias(lunesHoy, -7 * i));
+  const max = Math.max(1, ...lista.map((l) => Number((porSem.get(l) || {}).ventas) || 0));
+  const [abierta, setAbierta] = useState(lunesHoy);
+  return html`<div class="semanas">${lista.map((l, i) => {
+    const s = porSem.get(l), ant = porSem.get(masDias(l, -7));
+    const total = Number(s && s.ventas) || 0, t = s && ant ? variacion(s.ventas, ant.ventas) : null;
+    const dias = Array.from({ length: 7 }, (_, j) => masDias(l, j));
+    const conVenta = dias.filter((f) => porDia.get(f));
+    const open = abierta === l;
+    return html`<div key=${l} class=${'semana' + (i === 0 ? ' actual' : '') + (open ? ' abierta' : '')}>
+      <button class="sem-cab" onClick=${() => setAbierta(open ? null : l)} aria-expanded=${open}>
+        <span class="sem-fechas"><b>${i === 0 ? 'Esta semana' : i === 1 ? 'Semana pasada' : rangoSemana(l)}</b>${i < 2 ? html`<small>${rangoSemana(l)}</small>` : null}</span>
+        <span class="sem-der"><b class="sem-valor"><${Contar} value=${money(total)} /></b>
+          ${t != null ? html`<em class=${t >= 0 ? 'up' : 'down'}><${Icon} n=${t >= 0 ? 'up' : 'down'} size=${12} />${Math.abs(t)}%</em>` : html`<small>${total ? '' : 'sin ventas'}</small>`}</span>
+      </button>
+      <div class="sem-barra"><i style=${{ width: Math.max(total ? 3 : 0, (total / max) * 100) + '%' }}></i></div>
+      <div class="sem-semana" aria-hidden="true">${dias.map((f, j) => html`<span key=${f} class=${(porDia.get(f) ? 'con' : '') + (f === hoy ? ' hoy' : '')}><small>${DIAS[j]}</small>${Number(f.slice(8))}</span>`)}</div>
+      ${open && html`<div class="sem-dias">
+        ${conVenta.length ? conVenta.map((f) => { const x = porDia.get(f); return html`<div key=${f} class="sem-dia">
+          <span class="sd-dia">${mayus(new Date(f + 'T12:00:00').toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'short' }).replace('.', ''))}</span>
+          <span class="sd-val">${money(x.v)}</span><span class="sd-meta">${num(x.n)} pedidos · ${num(x.c)} canastas</span></div>`; })
+          : html`<p class="muted small">No hubo entregas esta semana.</p>`}
+        ${s && html`<div class="sem-meta"><span><b>${num(s.pedidos)}</b> pedidos</span><span><b>${num(s.canastas)}</b> canastas</span><span>En promedio <b>${money(s.ticket_promedio)}</b> por pedido</span>${Number(s.cancelados) > 0 ? html`<span class="rojo"><b>${num(s.cancelados)}</b> ${Number(s.cancelados) === 1 ? 'cancelado' : 'cancelados'}</span>` : null}</div>`}
+      </div>`}
+    </div>`; })}
+    <p class="cal-ayuda">Toca una semana para ver cuánto se vendió cada día.</p>
   </div>`;
 }

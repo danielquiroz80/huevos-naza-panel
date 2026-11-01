@@ -1238,3 +1238,56 @@ button.link { border: 0; background: none; padding: 0; font-family: inherit; cur
 .btn-dano { display: flex; width: fit-content; }
 .hero-kicker { text-transform: none; }
 .hero-kicker::first-letter { text-transform: uppercase; }
+
+/* ===== Filtros de Pedidos ===== */
+.filtros { display: grid; gap: 10px; }
+.filtro-estados { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; }
+.fe { border: 1.5px solid var(--line); background: var(--paper); border-radius: 14px; padding: 8px 6px; display: grid; gap: 1px; justify-items: center; cursor: pointer; font-family: inherit; color: var(--ink); transition: transform .12s, background .15s, border-color .15s; }
+.fe b { font-size: 17px; font-weight: 800; }
+.fe span { font-size: 12px; font-weight: 700; color: var(--muted); white-space: nowrap; }
+.fe:active { transform: scale(.96); }
+.fe.on { background: var(--ink); border-color: var(--ink); color: #fff; }
+.fe.on span { color: #E6E1F2; }
+.filtro-dias { display: grid; gap: 6px; }
+.fd-tit { font-size: 12px; font-weight: 800; color: var(--muted); }
+.filtros > .btn { justify-self: start; }
+@media (max-width: 560px) {
+  .filtro-estados { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .fe span { font-size: 11.5px; }
+}
+
+/* Mapas: que no se monten sobre la barra de abajo */
+.ctrl-map, .mapa, .leaflet-container { isolation: isolate; z-index: 0; }
+
+/* ===== Ventas por semana (tarjetas por semana) ===== */
+.semana { padding: 0; overflow: hidden; gap: 0; }
+.sem-cab { width: 100%; border: 0; background: none; padding: 12px 14px 8px; display: flex; justify-content: space-between; align-items: center; gap: 10px; cursor: pointer; font-family: inherit; color: var(--ink); text-align: left; }
+.sem-fechas { display: grid; gap: 1px; }
+.sem-fechas b { font-size: 15px; }
+.sem-fechas small { font-size: 12.5px; color: var(--muted); font-weight: 600; }
+.sem-der { display: grid; justify-items: end; gap: 3px; }
+.sem-der .sem-valor { font-size: 19px; }
+.sem-der small { font-size: 12px; color: var(--muted); }
+.sem-der em { font-style: normal; font-weight: 800; display: inline-flex; align-items: center; gap: 3px; padding: 1px 7px; border-radius: 99px; font-size: 12px; }
+.sem-der em.up { color: var(--green); background: var(--green-soft); } .sem-der em.down { color: var(--red); background: var(--red-soft); }
+.semana .sem-barra { margin: 0 14px; }
+.sem-semana { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; padding: 10px 14px 12px; }
+.sem-semana span { display: grid; justify-items: center; font-size: 13px; font-weight: 700; color: var(--muted); padding: 4px 0; border-radius: 9px; }
+.sem-semana span small { font-size: 10px; font-weight: 800; opacity: .7; }
+.sem-semana span.con { background: var(--amber); color: var(--ink); }
+.sem-semana span.hoy { box-shadow: 0 0 0 2px var(--ink) inset; }
+.sem-dias { display: grid; gap: 8px; padding: 0 14px 14px; animation: rise .25s var(--ease); }
+.sem-dia { display: grid; grid-template-columns: 1fr auto; gap: 0 10px; background: var(--cream); border-radius: 12px; padding: 9px 12px; }
+.sd-dia { font-weight: 700; font-size: 14px; }
+.sd-val { font-weight: 800; font-size: 15px; text-align: right; }
+.sd-meta { grid-column: 1 / -1; font-size: 12.5px; color: var(--muted); }
+.semana.abierta .sem-meta { padding-top: 2px; }
+
+/* ===== Periodo en Estadísticas ===== */
+.periodo { display: grid; gap: 10px; }
+.periodo-fechas { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.periodo-fechas .input { font-size: 16px; }
+.periodo-res { font-size: 13px; color: var(--muted); line-height: 1.45; }
+.periodo-res b { color: var(--ink); }
+.periodo .chips { gap: 8px; }
+.periodo .chip-b { padding: 8px 13px; }
