@@ -1083,3 +1083,9 @@ button.kpi { font: inherit; color: inherit; text-align: left; width: 100%; curso
 .no-hab p { max-width: 340px; margin: 0; line-height: 1.5; }
 .no-hab-ico { width: 58px; height: 58px; border-radius: 18px; display: grid; place-items: center; background: var(--amber-soft); color: #B07800; }
 .hab-card { border: 2px solid var(--violet); }
+
+/* Pestañas dentro de paneles (detalle de repartidor, etc.): que no se aplasten en el celular */
+.tabs { flex-shrink: 0; overflow-y: hidden; }
+.drawer-body { display: flex; flex-direction: column; }
+.drawer-body > * { flex-shrink: 0; }
+@supports (height: 100dvh) { .drawer { height: 100dvh; } }
