@@ -63,7 +63,7 @@ export function Estadisticas() {
       <div class="kpis">
         <${Kpi} icon="wallet" label="Ventas" value=${moneyShort(c.ventas)} sub=${'últimas ' + rango + ' semanas'} />
         <${Kpi} icon="egg" label="Canastas vendidas" value=${num(c.canastas)} tone="blue" />
-        <${Kpi} icon="pedidos" label="Ticket promedio" value=${money(c.ticket)} tone="violet" />
+        <${Kpi} icon="pedidos" label="Promedio por pedido" value=${money(c.ticket)} tone="violet" />
         <${Kpi} icon="x" label="Cancelación" value=${c.totalPed ? Math.round((c.cancel / c.totalPed) * 100) + '%' : '—'} sub=${num(c.cancel) + ' de ' + num(c.totalPed)} tone="red" />
       </div>
       <${Card} title="Ventas por semana" icon="chart"><${Bars} data=${c.barrasVentas} height=${220} /><//>

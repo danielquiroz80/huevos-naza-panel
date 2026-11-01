@@ -171,6 +171,34 @@ export function SearchBox({ value, onInput, placeholder = 'Buscar…' }) {
     <input type="search" value=${value} placeholder=${placeholder} onInput=${(e) => onInput(e.target.value)} /></label>`;
 }
 
+/** Permite cerrar un panel inferior arrastrándolo hacia abajo (celular). */
+export function useArrastre(onClose) {
+  const ref = useRef(null), st = useRef(null);
+  const onTouchStart = (e) => {
+    const el = ref.current; if (!el || e.touches.length > 1) return;
+    const cuerpo = e.target.closest('.modal-body, .sheet-scroll');
+    if (cuerpo && cuerpo.scrollTop > 0) return;
+    if (e.target.closest('input, textarea, select, .vsem-chart, .tabs, .chips')) return;
+    st.current = { y: e.touches[0].clientY, dy: 0, t: Date.now(), cuerpo: !!cuerpo };
+    el.style.transition = 'none';
+  };
+  const onTouchMove = (e) => {
+    const s = st.current, el = ref.current; if (!s || !el) return;
+    const dy = e.touches[0].clientY - s.y;
+    if (dy <= 0) { if (s.cuerpo) st.current = null; el.style.transform = ''; return; }
+    s.dy = dy; el.style.transform = 'translateY(' + dy + 'px)';
+    const ov = el.parentElement; if (ov) ov.style.background = 'rgba(36,31,53,' + Math.max(0, .45 - dy / 900) + ')';
+  };
+  const onTouchEnd = () => {
+    const s = st.current, el = ref.current; st.current = null; if (!s || !el) return;
+    el.style.transition = 'transform .22s ease';
+    const vel = s.dy / Math.max(1, Date.now() - s.t);
+    if (s.dy > 110 || (vel > .55 && s.dy > 35)) { el.style.transform = 'translateY(110%)'; setTimeout(onClose, 190); }
+    else { el.style.transform = ''; if (el.parentElement) el.parentElement.style.background = ''; }
+  };
+  return { ref, onTouchStart, onTouchMove, onTouchEnd };
+}
+
 export function Modal({ title, onClose, children, footer, wide }) {
   useEffect(() => {
     const k = (e) => e.key === 'Escape' && onClose();
@@ -178,8 +206,10 @@ export function Modal({ title, onClose, children, footer, wide }) {
     document.body.classList.add('no-scroll');
     return () => { window.removeEventListener('keydown', k); document.body.classList.remove('no-scroll'); };
   }, []);
+  const arr = useArrastre(onClose);
   return html`<div class="overlay" onClick=${(e) => e.target === e.currentTarget && onClose()}>
-    <div class=${'modal' + (wide ? ' wide' : '')} role="dialog" aria-modal="true" aria-label=${title}>
+    <div class=${'modal' + (wide ? ' wide' : '')} role="dialog" aria-modal="true" aria-label=${title} ref=${arr.ref} onTouchStart=${arr.onTouchStart} onTouchMove=${arr.onTouchMove} onTouchEnd=${arr.onTouchEnd}>
+      <div class="modal-grab" aria-hidden="true"></div>
       <div class="modal-head"><h3>${title}</h3><button class="icon-btn" onClick=${onClose} aria-label="Cerrar"><${Icon} n="x" /></button></div>
       <div class="modal-body">${children}</div>
       ${footer && html`<div class="modal-foot">${footer}</div>`}
@@ -232,7 +262,7 @@ export function Bars({ data, fmt = money, color = 'var(--amber)', height = 190 }
           <span class="tip"><b>${fmt(d.v)}</b>${d.tip || d.label}</span>
         </div>
       </div>
-      <span class="bar-label">${d.label}</span>
+      <span class="bar-label">${data.length <= 8 || i % Math.ceil(data.length / 6) === 0 || i === data.length - 1 ? d.label : ''}</span>
     </div>`)}
   </div>`;
 }

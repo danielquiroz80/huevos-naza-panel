@@ -5,7 +5,7 @@ export function EstadoBadge({ e }) { const x = ESTADOS[e] || { label: e, tone: '
 export function PagoBadge({ e }) { const x = PAGOS[e] || { label: e || '—', tone: 'gray' }; return html`<${Badge} tone=${x.tone}>${x.label}<//>`; }
 
 export function PedidoItem({ p, onClick }) {
-  return html`<button class="row-item" onClick=${onClick}>
+  return html`<button class="row-item ped-item" onClick=${onClick}>
     <div class="ri-id">#${p.id}</div>
     <div class="ri-main">
       <b>${p.cliente || 'Cliente'}</b>
@@ -72,7 +72,7 @@ export function PedidoDrawer({ pedido, onClose, onChanged }) {
       <div class="lines">
         ${items.map((it, i) => html`<div class="line" key=${i}><span><b>${it.cantidad}×</b> ${it.producto}</span></div>`)}
         <div class="line sep"><span>Productos</span><span>${money(p.subtotal_productos)}</span></div>
-        <div class="line"><span>Domicilio</span><span>${Number(p.costo_domicilio) ? money(p.costo_domicilio) : 'Sin costo'}</span></div>
+        <div class="line"><span>Envío</span><span>${Number(p.costo_domicilio) ? money(p.costo_domicilio) : 'Sin costo'}</span></div>
         <div class="line total"><span>Total</span><span>${money(p.total)}</span></div>
       </div>
       ${p.notas && html`<p class="note"><${Icon} n="chat" size=${14} />${p.notas}</p>`}

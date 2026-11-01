@@ -1,5 +1,5 @@
 import { render } from 'https://esm.sh/htm@3.1.1/preact/standalone';
-import { html, useState, useEffect, Icon, Toaster, toast, AsyncButton, Field, Modal } from './ui.js';
+import { html, useState, useEffect, Icon, Toaster, toast, AsyncButton, Field, Modal, useArrastre } from './ui.js';
 import { sb, q, CONFIG, ROLES, nombreUsuario, claveInvalida, REGLAS_CLAVE, DOMINIO_USUARIOS, dispositivo, registrarEvento, salir } from './lib.js';
 import { bioDisponible, bioConfig, bioActivar, bioVerificar, bioDesactivar, desbloqueado, bloquear } from './bio.js';
 import { Inicio } from './pages/inicio.js';
@@ -269,15 +269,39 @@ function Shell({ session, perfil }) {
       ${extras.length > 0 && html`<button class=${'bn' + (!movil.includes(R.id) ? ' on' : '')} onClick=${() => setMas(true)}><${Icon} n="grid" size=${21} /><span>Más</span></button>`}
     </nav>`}
 
-    ${mas && html`<div class="overlay" onClick=${(e) => e.target === e.currentTarget && setMas(false)}>
-      <div class="sheet-menu">
-        <div class="sheet-grab"></div>
-        <div class="sheet-grid">${extras.map((r) => html`<a key=${r.id} href=${'#/' + r.id} class="sheet-item"><span class="sheet-ico"><${Icon} n=${r.icon} size=${22} /></span>${r.label}</a>`)}</div>
-        ${instalar && html`<button class="btn ghost block" onClick=${() => { instalar.prompt(); setInstalar(null); }}><${Icon} n="download" size=${16} />Instalar app</button>`}
-      </div>
-    </div>`}
+    ${mas && html`<${MenuMas} extras=${extras} actual=${R.id} instalar=${instalar} onInstalar=${() => { instalar.prompt(); setInstalar(null); }} onClose=${() => setMas(false)} />`}
     ${cuenta && html`<${MiCuenta} perfil=${perfil} onClose=${() => setCuenta(false)} />`}
     <${Toaster} />
+  </div>`;
+}
+
+/* ---------- Menú "Más" (celular): agrupado, con descripción y se cierra deslizando hacia abajo ---------- */
+const GRUPOS_MAS = [
+  { t: 'Análisis', ids: ['reportes', 'consejos', 'estadisticas'] },
+  { t: 'Negocio', ids: ['productos', 'clientes', 'compras', 'planeacion'] },
+  { t: 'Ajustes', ids: ['negocio'] },
+];
+const DESC_MAS = { reportes: 'Informes y descargas', consejos: 'Ideas para mejorar con IA', estadisticas: 'Ventas, clientes y barrios', productos: 'Precios e inventario',
+  clientes: 'Quién compra y qué', compras: 'Lo que le compras al proveedor', planeacion: 'Qué alistar la próxima semana', negocio: 'Zonas, equipo y configuración',
+  repartidores: 'Equipo de reparto', pedidos: 'Todos los pedidos', entregas: 'Rutas y reparto', inicio: 'Resumen del día' };
+function MenuMas({ extras, actual, instalar, onInstalar, onClose }) {
+  const arr = useArrastre(onClose);
+  useEffect(() => { document.body.classList.add('no-scroll'); return () => document.body.classList.remove('no-scroll'); }, []);
+  const usados = new Set();
+  const grupos = GRUPOS_MAS.map((g) => ({ t: g.t, items: extras.filter((r) => g.ids.includes(r.id) && usados.add(r.id)) })).filter((g) => g.items.length);
+  const otros = extras.filter((r) => !usados.has(r.id));
+  if (otros.length) grupos.push({ t: 'Otros', items: otros });
+  return html`<div class="overlay" onClick=${(e) => e.target === e.currentTarget && onClose()}>
+    <div class="sheet-menu" ref=${arr.ref} onTouchStart=${arr.onTouchStart} onTouchMove=${arr.onTouchMove} onTouchEnd=${arr.onTouchEnd} role="dialog" aria-label="Más secciones">
+      <div class="sheet-grab"></div>
+      <div class="sheet-scroll">
+        ${grupos.map((g) => html`<div key=${g.t} class="sheet-grupo"><span class="sheet-tit">${g.t}</span>
+          <div class="sheet-lista">${g.items.map((r) => html`<a key=${r.id} href=${'#/' + r.id} class=${'sheet-fila' + (r.id === actual ? ' on' : '')} onClick=${onClose}>
+            <span class="sheet-ico"><${Icon} n=${r.icon} size=${20} /></span><span class="sheet-txt"><b>${r.label}</b><small>${DESC_MAS[r.id] || ''}</small></span><${Icon} n="chevron" size=${16} /></a>`)}</div></div>`)}
+        ${instalar && html`<button class="btn ghost block" onClick=${onInstalar}><${Icon} n="download" size=${16} />Instalar app en este teléfono</button>`}
+        <p class="sheet-tip">Desliza hacia abajo para cerrar</p>
+      </div>
+    </div>
   </div>`;
 }
 

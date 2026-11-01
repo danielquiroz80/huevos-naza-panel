@@ -4,7 +4,7 @@ import { PedidoItem, PedidoDrawer, EstadoBadge } from './pedidos.js';
 
 async function cargar() {
   const hoy = hoyISO();
-  const [semanas, abiertos, inventario, consolidado, pagosPend, solicitudes, zonasNR, habs] = await Promise.all([
+  const [semanas, abiertos, inventario, consolidado, pagosPend, solicitudes, zonasNR, habs, diarios] = await Promise.all([
     q(sb.from('v_ventas_semana').select('*').order('semana', { ascending: false }).limit(10)),
     q(sb.from('v_pedidos').select('*').in('estado', ABIERTOS).order('fecha_entrega')),
     q(sb.from('v_inventario').select('*').order('nombre')),
@@ -12,9 +12,10 @@ async function cargar() {
     q(sb.from('pagos').select('id,pedido_id,monto,created_at').eq('estado', 'pendiente')),
     q(sb.from('v_solicitudes_abiertas').select('id,tipo,cliente,created_at')),
     q(sb.from('zonas_no_reconocidas').select('id', { count: 'exact', head: false }).eq('resuelto', false).limit(200)),
-    sb.rpc('panel_habilitaciones', { p_fecha: null }).then((x) => x.data || [], () => [])
+    sb.rpc('panel_habilitaciones', { p_fecha: null }).then((x) => x.data || [], () => []),
+    q(sb.from('v_pedidos').select('fecha_entrega,total,canastas,estado').gte('fecha_entrega', isoLunes(-9)).neq('estado', 'cancelado').limit(5000))
   ]);
-  return { semanas, abiertos, inventario, consolidado, pagosPend, solicitudes, zonasNR, habs };
+  return { semanas, abiertos, inventario, consolidado, pagosPend, solicitudes, zonasNR, habs, diarios };
 }
 
 export function Inicio({ perfil }) {
@@ -64,17 +65,17 @@ export function Inicio({ perfil }) {
 
     <div class="kpis">
       <${Kpi} icon="wallet" label="Ventas esta semana" value=${moneyShort(actual.ventas)} trend=${variacion(actual.ventas, anterior.ventas)} sub="vs. semana anterior" onClick=${() => setDet('ventas')} />
-      <${Kpi} icon="pedidos" label="Pedidos abiertos" value=${num(d.abiertos.length)} sub=${num(sum(d.abiertos, 'canastas')) + ' canastas'} tone="blue" onClick=${() => setDet('abiertos')} />
+      <${Kpi} icon="pedidos" label="Pedidos activos" value=${num(d.abiertos.length)} sub=${num(sum(d.abiertos, 'canastas')) + ' canastas'} tone="blue" onClick=${() => setDet('abiertos')} />
       <${Kpi} icon="truck" label="Canastas por entregar" value=${num(canastasProx)} sub=${proxFecha ? 'desde ' + fechaCorta(proxFecha) : 'sin fecha'} tone="violet" onClick=${() => setDet('canastas')} />
       <${Kpi} icon="clock" label="Por cobrar" value=${moneyShort(porCobrar)} sub="en pedidos abiertos" tone="red" onClick=${() => setDet('cobrar')} />
     </div>
 
     <div class="grid-2">
-      <${Card} title="Ventas por semana" icon="chart" action=${html`<button class="link" onClick=${() => setDet('ventas')}>Ver todas</button>`}>
-        <${VentasSemana} semanas=${d.semanas.slice(0, 8)} onVer=${() => setDet('ventas')} />
+      <${Card} title="Calendario de ventas" icon="calendar" action=${html`<button class="link" onClick=${() => setDet('ventas')}>Ver todas</button>`}>
+        <${CalendarioVentas} semanas=${d.semanas} diarios=${d.diarios} filas=${5} />
       <//>
       <${Card} title="Pendientes" icon="bell">
-        ${alertas.length === 0 ? html`<${Empty} icon="check" title="Todo al día">No hay alertas por ahora.<//>` :
+        ${alertas.length === 0 ? html`<p class="todo-ok"><${Icon} n="check" size=${16} />Todo al día: no hay nada pendiente.</p>` :
           html`<div class="alerts">${alertas.map((a, i) => html`<a key=${i} class=${'alert-item ' + a.tone} href=${a.href}><span class="alert-ico"><${Icon} n=${a.icon} size=${16} /></span><span>${a.t}</span><${Icon} n="external" size=${14} /></a>`)}</div>`}
       <//>
     </div>
@@ -104,24 +105,14 @@ function DetalleKpi({ tipo, d, onClose, onPedido }) {
     <div class="ri-main"><b>#${p.id} · ${p.cliente || 'Cliente'}</b><span class="ri-meta">${fechaCorta(p.fecha_entrega)} · ${num(p.canastas)} can. · ${[p.barrio, p.municipio].filter(Boolean).join(', ')}</span></div>
     <div class="row-btns"><b>${valor ? valor(p) : money(p.total)}</b><${EstadoBadge} e=${p.estado} /></div></button>`)}</div>` : html`<${Empty} icon="check" title="No hay pedidos aquí" />`;
   if (tipo === 'ventas') {
-    const sem = d.semanas.slice(0, 10);
-    const max = Math.max(1, ...sem.map((x) => Number(x.ventas) || 0));
-    return html`<${Modal} wide title="Ventas por semana" onClose=${onClose}>
-      <p class="muted small">Cada semana va de lunes a domingo. La flecha compara con la semana anterior.</p>
-      <div class="semanas">${sem.map((s, i) => { const prev = sem[i + 1]; const t = prev ? variacion(s.ventas, prev.ventas) : null;
-        return html`<div key=${s.semana} class=${'semana' + (i === 0 ? ' actual' : '')}>
-          <div class="sem-top"><b>${rangoSemana(s.semana)}${i === 0 ? ' · esta semana' : ''}</b>
-            ${t != null && html`<em class=${t >= 0 ? 'up' : 'down'}><${Icon} n=${t >= 0 ? 'up' : 'down'} size=${13} />${Math.abs(t)}%</em>`}</div>
-          <div class="sem-valor">${money(s.ventas)}</div>
-          <div class="sem-barra"><i style=${{ width: Math.max(2, (Number(s.ventas) / max) * 100) + '%' }}></i></div>
-          <div class="sem-meta"><span><b>${num(s.pedidos)}</b> pedidos</span><span><b>${num(s.canastas)}</b> canastas</span><span>Ticket <b>${money(s.ticket_promedio)}</b></span>${Number(s.cancelados) > 0 ? html`<span class="rojo"><b>${num(s.cancelados)}</b> ${Number(s.cancelados) === 1 ? 'cancelado' : 'cancelados'}</span>` : null}</div>
-        </div>`; })}</div>
+    return html`<${Modal} wide title="Calendario de ventas" onClose=${onClose}>
+      <${CalendarioVentas} semanas=${d.semanas} diarios=${d.diarios} filas=${10} />
       <a class="btn ghost block" href="#/estadisticas" onClick=${onClose}><${Icon} n="chart" size=${16} />Ver estadísticas completas</a>
     <//>`;
   }
   if (tipo === 'abiertos') {
     const grupos = [...groupBy(d.abiertos, (p) => p.estado).entries()];
-    return html`<${Modal} wide title=${'Pedidos abiertos · ' + d.abiertos.length} onClose=${onClose}>
+    return html`<${Modal} wide title=${'Pedidos activos · ' + d.abiertos.length} onClose=${onClose}>
       ${grupos.map(([e, ps]) => html`<div key=${e} class="det-grupo"><div class="section-title"><${EstadoBadge} e=${e} /> ${ps.length} pedido(s) · ${num(sum(ps, 'canastas'))} canastas</div>${lista(ps)}</div>`)}
       ${!grupos.length && html`<${Empty} icon="check" title="No hay pedidos abiertos" />`}
     <//>`;
@@ -137,7 +128,7 @@ function DetalleKpi({ tipo, d, onClose, onPedido }) {
   }
   const ps = d.abiertos.filter((p) => p.pago_estado !== 'pagado').sort((a, b) => (Number(b.total) || 0) - (Number(a.total) || 0));
   return html`<${Modal} wide title=${'Por cobrar · ' + money(sum(ps, 'total'))} onClose=${onClose}>
-    <p class="muted small">Pedidos abiertos que aún no tienen el pago verificado. Toca uno para registrar el pago.</p>${lista(ps)}<//>`;
+    <p class="muted small">Pedidos activos que aún no tienen el pago verificado. Toca uno para registrar el pago.</p>${lista(ps)}<//>`;
 }
 
 const corta = (d) => d.toLocaleDateString('es-CO', { day: 'numeric', month: 'short' }).replace('.', '');
@@ -147,33 +138,48 @@ export function rangoSemana(lunes) {
   return corta(a) + ' – ' + corta(b);
 }
 
-/** Ventas por semana: toca una barra para ver el detalle de esa semana. */
-function VentasSemana({ semanas, onVer }) {
-  const lista = [...semanas].reverse();
-  const [i, setI] = useState(lista.length - 1);
-  if (!lista.length) return html`<${Empty} icon="chart" title="Sin ventas todavía">Cuando entregues pedidos verás aquí las ventas de cada semana.<//>`;
-  const s = lista[i] || lista[lista.length - 1], prev = lista[i - 1];
-  const t = prev ? variacion(s.ventas, prev.ventas) : null;
-  const max = Math.max(1, ...lista.map((x) => Number(x.ventas) || 0));
-  const prom = lista.reduce((a, x) => a + (Number(x.ventas) || 0), 0) / lista.length;
-  return html`<div class="vsem">
-    <div class="vsem-head">
-      <span class="vsem-sem">${i === lista.length - 1 ? 'Esta semana' : 'Semana'} · ${rangoSemana(s.semana)}</span>
-      <div class="vsem-total"><${Contar} value=${money(s.ventas)} /></div>
-      <span class="vsem-cmp">${t == null ? 'Primera semana con datos' : html`<em class=${t >= 0 ? 'up' : 'down'}><${Icon} n=${t >= 0 ? 'up' : 'down'} size=${13} />${Math.abs(t)}%</em> frente a la semana anterior`}</span>
+function isoLunes(semanas) {
+  const d = new Date(); d.setHours(12, 0, 0, 0); d.setDate(d.getDate() - ((d.getDay() + 6) % 7) + semanas * 7);
+  return d.toISOString().slice(0, 10);
+}
+const DIAS = ['L', 'M', 'M', 'J', 'V', 'S', 'D'];
+const mayus = (t) => t.charAt(0).toUpperCase() + t.slice(1);
+const iso = (d) => d.toISOString().slice(0, 10);
+const masDias = (f, n) => { const d = new Date(f + 'T12:00:00'); d.setDate(d.getDate() + n); return iso(d); };
+
+/** Calendario de ventas: cada fila es una semana (lunes a domingo). Toca un día o una semana para ver el detalle. */
+function CalendarioVentas({ semanas, diarios, filas = 5 }) {
+  const porDia = new Map();
+  for (const p of diarios || []) { const x = porDia.get(p.fecha_entrega) || { v: 0, n: 0, c: 0 }; x.v += Number(p.total) || 0; x.n += 1; x.c += Number(p.canastas) || 0; porDia.set(p.fecha_entrega, x); }
+  const porSem = new Map((semanas || []).map((s) => [s.semana, s]));
+  const lunesHoy = isoLunes(0), hoy = iso(new Date(new Date().setHours(12, 0, 0, 0)));
+  const filasSem = Array.from({ length: filas }, (_, i) => masDias(lunesHoy, -7 * i));
+  const maxDia = Math.max(1, ...[...porDia.values()].map((x) => x.v));
+  const [sel, setSel] = useState(() => ({ t: 'sem', k: lunesHoy }));
+  const detalle = sel.t === 'dia' ? porDia.get(sel.k) : porSem.get(sel.k);
+  const semAnt = sel.t === 'sem' ? porSem.get(masDias(sel.k, -7)) : null;
+  const t = semAnt && detalle ? variacion(detalle.ventas, semAnt.ventas) : null;
+  const titulo = sel.t === 'dia' ? mayus(new Date(sel.k + 'T12:00:00').toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long' })) : (sel.k === lunesHoy ? 'Esta semana · ' : 'Semana · ') + rangoSemana(sel.k);
+  const valor = detalle ? (sel.t === 'dia' ? detalle.v : Number(detalle.ventas)) : 0;
+  return html`<div class="cal">
+    <div class="cal-det">
+      <span class="cal-tit">${titulo}</span>
+      <div class="cal-valor"><${Contar} key=${sel.t + sel.k} value=${money(valor)} /></div>
+      ${!detalle ? html`<span class="cal-sub">No hubo ventas.</span>` : sel.t === 'dia'
+        ? html`<span class="cal-sub"><b>${num(detalle.n)}</b> pedidos · <b>${num(detalle.c)}</b> canastas</span>`
+        : html`<span class="cal-sub"><b>${num(detalle.pedidos)}</b> pedidos · <b>${num(detalle.canastas)}</b> canastas · en promedio <b>${money(detalle.ticket_promedio)}</b> por pedido
+            ${t != null && html` <em class=${t >= 0 ? 'up' : 'down'}><${Icon} n=${t >= 0 ? 'up' : 'down'} size=${12} />${Math.abs(t)}% vs. semana anterior</em>`}</span>`}
     </div>
-    <div class="vsem-chart" role="group" aria-label="Ventas de las últimas semanas">
-      <div class="vsem-prom" style=${{ bottom: (prom / max) * 100 + '%' }}><span>Promedio ${money(Math.round(prom))}</span></div>
-      ${lista.map((x, j) => html`<button key=${x.semana} class=${'vsem-col' + (j === i ? ' on' : '')} onClick=${() => setI(j)} aria-label=${'Semana ' + rangoSemana(x.semana) + ': ' + money(x.ventas)}>
-        <span class="vsem-bar" style=${{ height: Math.max(3, (Number(x.ventas) / max) * 100) + '%', animationDelay: j * 40 + 'ms' }}></span>
-        <span class="vsem-lbl">${corta(new Date(x.semana + 'T12:00:00'))}</span></button>`)}
+    <div class="cal-grid" role="grid" aria-label="Ventas por día">
+      <span></span>${DIAS.map((x, i) => html`<span key=${i} class="cal-dow">${x}</span>`)}
+      ${filasSem.map((l) => { const s = porSem.get(l); return html`
+        <button key=${'s' + l} class=${'cal-sem' + (sel.t === 'sem' && sel.k === l ? ' on' : '')} onClick=${() => setSel({ t: 'sem', k: l })} aria-label=${'Semana ' + rangoSemana(l)}>
+          <b>${Number(l.slice(8))}</b><small>${new Date(l + 'T12:00:00').toLocaleDateString('es-CO', { month: 'short' }).replace('.', '')}</small></button>
+        ${DIAS.map((_, j) => { const f = masDias(l, j), x = porDia.get(f), fut = f > hoy;
+          return html`<button key=${f} class=${'cal-dia' + (x ? ' con' : '') + (f === hoy ? ' hoy' : '') + (fut ? ' fut' : '') + (sel.t === 'dia' && sel.k === f ? ' on' : '')}
+            style=${x ? { '--i': (0.25 + 0.75 * (x.v / maxDia)).toFixed(2) } : null} disabled=${!x} onClick=${() => setSel({ t: 'dia', k: f })}
+            aria-label=${f + (x ? ': ' + money(x.v) : ': sin ventas')}><span>${Number(f.slice(8))}</span></button>`; })}`; })}
     </div>
-    <p class="vsem-ayuda">Toca una barra para ver esa semana.</p>
-    <div class="vsem-stats">
-      <div><span>Pedidos</span><b>${num(s.pedidos)}</b></div>
-      <div><span>Canastas</span><b>${num(s.canastas)}</b></div>
-      <div><span>Ticket promedio</span><b>${money(s.ticket_promedio)}</b></div>
-      <div><span>Cancelados</span><b class=${Number(s.cancelados) ? 'rojo' : ''}>${num(s.cancelados)}</b></div>
-    </div>
+    <p class="cal-ayuda">Los días de color tuvieron ventas: más oscuro, más ventas. Toca un día para ver sus ventas, o la fecha de la izquierda para ver la semana completa.</p>
   </div>`;
 }

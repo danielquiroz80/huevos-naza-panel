@@ -588,12 +588,12 @@ function EnVivo({ onVer, onPlanear, onPedidos, onRutas }) {
     <${ErrorBox} error=${r.error} onRetry=${r.reload} />
     ${!d ? html`<${Loader} rows=${6} />` : html`
     <div class="ctrl-kpis six">
-      <button class="ck" onClick=${onPedidos}><span>Disponibles para asignar</span><b>${num(d.sinRuta)}</b><small>pedidos sin ruta</small></button>
-      <button class="ck" onClick=${onPedidos}><span>Pedidos asignados</span><b>${num(sum(rutas, (x) => x.paradas.filter((p) => ABIERTA.includes(p.estado)).length))}</b><small>por entregar en rutas</small></button>
-      <button class="ck" onClick=${onRutas}><span>Rutas tomadas</span><b>${rutas.filter((x) => x.estado === 'planeada' && x.repartidor).length}</b><small>${rutas.filter((x) => x.estado === 'planeada' && !x.repartidor).length} disponibles sin tomar</small></button>
-      <button class="ck violet" onClick=${onRutas}><span>Rutas en curso</span><b>${enCurso.length}</b><small>${total ? Math.round((hechos / total) * 100) : 0}% del día completado</small></button>
-      <button class="ck ok" onClick=${onRutas}><span>Rutas finalizadas</span><b>${rutas.filter((x) => x.estado === 'terminada').length}</b><small>${num(sum(rutas, 'ok'))} entregas exitosas</small></button>
-      <button class="ck no" onClick=${onPedidos}><span>Entregas con inconvenientes</span><b>${num(sum(rutas, 'no'))}</b><small>por reprogramar</small></button>
+      <button class="ck" onClick=${onPedidos}><span>Sin ruta</span><b>${num(d.sinRuta)}</b><small>pedidos por asignar</small></button>
+      <button class="ck" onClick=${onPedidos}><span>En rutas</span><b>${num(sum(rutas, (x) => x.paradas.filter((p) => ABIERTA.includes(p.estado)).length))}</b><small>pedidos por entregar</small></button>
+      <button class="ck" onClick=${onRutas}><span>Por salir</span><b>${rutas.filter((x) => x.estado === 'planeada' && x.repartidor).length}</b><small>${rutas.filter((x) => x.estado === 'planeada' && !x.repartidor).length} sin repartidor</small></button>
+      <button class="ck violet" onClick=${onRutas}><span>En camino</span><b>${enCurso.length}</b><small>${total ? Math.round((hechos / total) * 100) : 0}% del día listo</small></button>
+      <button class="ck ok" onClick=${onRutas}><span>Terminadas</span><b>${rutas.filter((x) => x.estado === 'terminada').length}</b><small>${num(sum(rutas, 'ok'))} entregados</small></button>
+      <button class="ck no" onClick=${onPedidos}><span>No entregados</span><b>${num(sum(rutas, 'no'))}</b><small>para reprogramar</small></button>
     </div>
     <div class="ctrl-main">
       <div class="ctrl-map">
@@ -1062,7 +1062,7 @@ function PrepararRuta({ ruta, pendientes, gestor, onCambio, onPedidos }) {
     </div>
 
     <div class=${'paso' + (puedeIniciar ? ' activo' : ' bloqueado')}>
-      <div class="paso-head"><span class="paso-num">3</span><div><b>¡A rodar!</b><span>Al iniciar, cada cliente recibe su turno y la hora aproximada de llegada.</span></div></div>
+      <div class="paso-head"><span class="paso-num">3</span><div><b>¡Listo para salir!</b><span>Al iniciar, cada cliente recibe su turno y la hora aproximada de llegada.</span></div></div>
       <${AsyncButton} className="btn violet big block" icon="play" disabled=${!puedeIniciar} onClick=${iniciar}>${puedeIniciar ? 'Iniciar recorrido' : 'Primero confirma tu carga'}<//>
     </div>
     ${ruta.repartidor && html`<button class="btn ghost block" onClick=${() => setLiberando(true)}><${Icon} n="lock" size=${16} />Liberar esta ruta</button>`}
