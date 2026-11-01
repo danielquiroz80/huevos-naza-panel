@@ -113,13 +113,30 @@ export function Card({ title, icon, action, children, className = '', pad = true
   </section>`;
 }
 
+/** Muestra un valor con una animación corta que cuenta desde 0 (ej.: "$ 527.000", "21"). */
+export function Contar({ value, ms = 700 }) {
+  const m = typeof value === 'string' || typeof value === 'number' ? String(value).match(/^(\D*?)(\d{1,3}(?:\.\d{3})+|\d+)(.*)$/) : null;
+  const meta = m ? Number(m[2].replace(/\./g, '')) : 0;
+  const [v, setV] = useState(m ? 0 : null);
+  useEffect(() => {
+    if (!m) return;
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) { setV(meta); return; }
+    let raf, t0;
+    const paso = (t) => { if (!t0) t0 = t; const k = Math.min(1, (t - t0) / ms); setV(Math.round(meta * (1 - Math.pow(1 - k, 3)))); if (k < 1) raf = requestAnimationFrame(paso); };
+    raf = requestAnimationFrame(paso);
+    return () => cancelAnimationFrame(raf);
+  }, [meta]);
+  if (!m) return value;
+  return m[1] + v.toLocaleString('es-CO') + m[3];
+}
+
 export function Kpi({ icon, label, value, sub, trend, tone = '', onClick }) {
   const Tag = onClick ? 'button' : 'div';
   return html`<${Tag} class=${'kpi ' + tone + (onClick ? ' clic' : '')} onClick=${onClick} type=${onClick ? 'button' : null}>
     <div class="kpi-icon"><${Icon} n=${icon} size=${20} /></div>
     <div class="kpi-body">
       <span class="kpi-label">${label}</span>
-      <strong class="kpi-value">${value}</strong>
+      <strong class="kpi-value"><${Contar} value=${value} /></strong>
       ${(sub || trend != null) && html`<span class="kpi-sub">
         ${trend != null && html`<em class=${trend >= 0 ? 'up' : 'down'}><${Icon} n=${trend >= 0 ? 'up' : 'down'} size=${13} />${Math.abs(trend)}%</em>`}
         ${sub}</span>`}

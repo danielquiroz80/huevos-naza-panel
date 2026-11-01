@@ -1089,3 +1089,64 @@ button.kpi { font: inherit; color: inherit; text-align: left; width: 100%; curso
 .drawer-body { display: flex; flex-direction: column; }
 .drawer-body > * { flex-shrink: 0; }
 @supports (height: 100dvh) { .drawer { height: 100dvh; } }
+
+/* ===== Inicio en el celular: valores completos ===== */
+@media (max-width: 560px) {
+  .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .kpi { flex-direction: column; gap: 8px; padding: 14px; }
+  .kpi-icon { width: 34px; height: 34px; border-radius: 11px; }
+  .kpi-value { font-size: clamp(17px, 5.2vw, 22px); white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; line-height: 1.15; }
+  .kpi-label { font-size: 12.5px; line-height: 1.25; padding-right: 16px; }
+  .kpi-mas { top: 12px; right: 10px; }
+}
+
+/* ===== Ventas por semana (interactivo) ===== */
+.vsem { display: grid; gap: 12px; }
+.vsem-head { display: grid; gap: 2px; }
+.vsem-sem { font-size: 13px; font-weight: 700; color: var(--muted); }
+.vsem-total { font-size: clamp(26px, 7vw, 34px); font-weight: 800; letter-spacing: -.02em; }
+.vsem-cmp { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.vsem-cmp em, .sem-top em { font-style: normal; font-weight: 800; display: inline-flex; align-items: center; gap: 3px; padding: 2px 8px; border-radius: 99px; font-size: 12.5px; }
+.vsem-cmp em.up, .sem-top em.up { color: var(--green); background: var(--green-soft); }
+.vsem-cmp em.down, .sem-top em.down { color: var(--red); background: var(--red-soft); }
+.vsem-chart { position: relative; display: flex; align-items: stretch; gap: 6px; height: 170px; padding-top: 8px; }
+.vsem-col { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: flex-end; align-items: stretch; gap: 6px; border: 0; background: none; padding: 0; cursor: pointer; font: inherit; -webkit-tap-highlight-color: transparent; }
+.vsem-bar { display: block; width: 100%; border-radius: 9px 9px 4px 4px; background: var(--amber); opacity: .4; transform-origin: bottom; animation: grow .6s var(--ease) both; transition: opacity .2s, transform .2s; }
+.vsem-col:hover .vsem-bar { opacity: .7; }
+.vsem-col.on .vsem-bar { opacity: 1; box-shadow: 0 6px 16px -6px rgba(247, 176, 22, .8); }
+.vsem-col:active .vsem-bar { transform: scaleY(.97); }
+.vsem-lbl { font-size: 11px; font-weight: 700; color: var(--muted); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vsem-col.on .vsem-lbl { color: var(--ink); }
+.vsem-col:focus-visible { outline: 3px solid var(--amber); outline-offset: 2px; border-radius: 10px; }
+.vsem-prom { position: absolute; left: 0; right: 0; margin-bottom: 23px; border-top: 2px dashed rgba(36, 31, 53, .25); pointer-events: none; z-index: 1; }
+.vsem-prom span { position: absolute; right: 0; top: -20px; font-size: 11px; font-weight: 700; color: var(--muted); background: var(--paper); padding: 0 4px; border-radius: 4px; }
+.vsem-ayuda { margin: -4px 0 0; font-size: 12px; color: var(--muted); text-align: center; }
+.vsem-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.vsem-stats div { background: var(--cream); border-radius: 12px; padding: 9px 10px; display: grid; gap: 2px; }
+.vsem-stats span { font-size: 11.5px; color: var(--muted); font-weight: 700; }
+.vsem-stats b { font-size: 15px; overflow-wrap: anywhere; }
+.rojo { color: var(--red); }
+@media (max-width: 560px) { .vsem-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } .vsem-chart { height: 150px; gap: 4px; } }
+
+/* Detalle de ventas por semana */
+.semanas { display: grid; gap: 10px; margin: 10px 0 14px; }
+.semana { border: 1.5px solid var(--line); border-radius: 16px; padding: 12px 14px; display: grid; gap: 6px; background: var(--paper); }
+.semana.actual { border-color: var(--amber); background: linear-gradient(0deg, var(--paper), var(--amber-soft)); }
+.sem-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 13.5px; }
+.sem-valor { font-size: 22px; font-weight: 800; letter-spacing: -.01em; }
+.sem-barra { height: 8px; border-radius: 99px; background: var(--gray-soft); overflow: hidden; }
+.sem-barra i { display: block; height: 100%; border-radius: 99px; background: var(--amber); transform-origin: left; animation: crecer-x .6s var(--ease) both; }
+.sem-meta { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; color: var(--muted); }
+.sem-meta b { color: var(--ink); }
+@keyframes crecer-x { from { transform: scaleX(0); } }
+
+/* ===== Respuesta al tocar: la app se siente viva ===== */
+.btn, .row-item, .kpi.clic, .chip-b, .seg-b, .rep-chip, .estado-op, .ruta-chip, .menu-item, .side-link { transition: transform .12s var(--ease), box-shadow .2s, background .2s, border-color .2s; }
+.btn:active:not(:disabled), button.row-item:active, .kpi.clic:active, .chip-b:active, .seg-b:active, .rep-chip:active, .estado-op:active, .ruta-chip:active, .menu-item:active { transform: scale(.97); }
+.kpi, .semana { animation: rise .35s var(--ease) backwards; }
+@media (prefers-reduced-motion: reduce) { .kpi, .semana, .vsem-bar, .sem-barra i { animation: none; } }
+button.link { border: 0; background: none; padding: 0; font-family: inherit; cursor: pointer; }
+.vsem-prom span { top: 3px; }
+/* Valores completos en los indicadores (sin "…") */
+.kpi-value { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; line-height: 1.15; font-size: clamp(18px, 1.75vw, 24px); }
+@media (max-width: 560px) { .kpi-value { font-size: clamp(17px, 5.2vw, 22px); } }

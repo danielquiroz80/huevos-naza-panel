@@ -1,4 +1,4 @@
-import { html, useState, Icon, Card, Kpi, Bars, Loader, Empty, ErrorBox, Badge, Modal, useAsync } from '../ui.js';
+import { html, useState, Icon, Card, Kpi, Contar, Loader, Empty, ErrorBox, Badge, Modal, useAsync } from '../ui.js';
 import { sb, q, money, moneyShort, num, fecha, fechaLarga, fechaCorta, saludo, variacion, sum, ABIERTOS, hoyISO, groupBy } from '../lib.js';
 import { PedidoItem, PedidoDrawer, EstadoBadge } from './pedidos.js';
 
@@ -47,10 +47,6 @@ export function Inicio({ perfil }) {
   if (d.solicitudes.length) alertas.push({ tone: 'violet', icon: 'chat', t: `${d.solicitudes.length} caso(s) de clientes abiertos`, href: '#/negocio' });
   if (d.zonasNR.length) alertas.push({ tone: 'gray', icon: 'pin', t: `${d.zonasNR.length} barrio(s) que el bot no reconoció`, href: '#/negocio' });
 
-  const barras = [...d.semanas].reverse().slice(-8).map((s, i, arr) => ({
-    k: s.semana, label: fecha(s.semana), v: Number(s.ventas) || 0, hl: i === arr.length - 1,
-    tip: `Semana del ${fecha(s.semana)} · ${num(s.pedidos)} pedidos`
-  }));
 
   return html`<div class="stack">
     <section class="hero">
@@ -74,13 +70,8 @@ export function Inicio({ perfil }) {
     </div>
 
     <div class="grid-2">
-      <${Card} title="Ventas por semana" icon="chart" action=${html`<a class="link" href="#/estadisticas">Ver más</a>`}>
-        <${Bars} data=${barras} />
-        <div class="mini-stats">
-          <div><span>Ticket promedio</span><b>${money(actual.ticket_promedio)}</b></div>
-          <div><span>Canastas</span><b>${num(actual.canastas)}</b></div>
-          <div><span>Cancelados</span><b>${num(actual.cancelados)}</b></div>
-        </div>
+      <${Card} title="Ventas por semana" icon="chart" action=${html`<button class="link" onClick=${() => setDet('ventas')}>Ver todas</button>`}>
+        <${VentasSemana} semanas=${d.semanas.slice(0, 8)} onVer=${() => setDet('ventas')} />
       <//>
       <${Card} title="Pendientes" icon="bell">
         ${alertas.length === 0 ? html`<${Empty} icon="check" title="Todo al día">No hay alertas por ahora.<//>` :
@@ -113,12 +104,18 @@ function DetalleKpi({ tipo, d, onClose, onPedido }) {
     <div class="ri-main"><b>#${p.id} · ${p.cliente || 'Cliente'}</b><span class="ri-meta">${fechaCorta(p.fecha_entrega)} · ${num(p.canastas)} can. · ${[p.barrio, p.municipio].filter(Boolean).join(', ')}</span></div>
     <div class="row-btns"><b>${valor ? valor(p) : money(p.total)}</b><${EstadoBadge} e=${p.estado} /></div></button>`)}</div>` : html`<${Empty} icon="check" title="No hay pedidos aquí" />`;
   if (tipo === 'ventas') {
-    const sem = d.semanas.slice(0, 8);
+    const sem = d.semanas.slice(0, 10);
+    const max = Math.max(1, ...sem.map((x) => Number(x.ventas) || 0));
     return html`<${Modal} wide title="Ventas por semana" onClose=${onClose}>
-      <p class="muted small">Ventas de pedidos entregados por semana (lunes a domingo).</p>
-      <div class="tabla-wrap"><table class="tabla"><thead><tr><th>Semana</th><th>Ventas</th><th>Pedidos</th><th>Canastas</th><th>Ticket promedio</th><th>Cancelados</th></tr></thead>
-        <tbody>${sem.map((s) => html`<tr key=${s.semana}><td>${fecha(s.semana)}</td><td class="num">${money(s.ventas)}</td><td class="num">${num(s.pedidos)}</td><td class="num">${num(s.canastas)}</td><td class="num">${money(s.ticket_promedio)}</td><td class="num">${num(s.cancelados)}</td></tr>`)}</tbody></table></div>
-      <div class="tabla-cards">${sem.map((s) => html`<div key=${s.semana} class="tc"><div><span>Semana</span><b>${fecha(s.semana)}</b></div><div><span>Ventas</span><b>${money(s.ventas)}</b></div><div><span>Pedidos</span><b>${num(s.pedidos)}</b></div><div><span>Ticket</span><b>${money(s.ticket_promedio)}</b></div></div>`)}</div>
+      <p class="muted small">Cada semana va de lunes a domingo. La flecha compara con la semana anterior.</p>
+      <div class="semanas">${sem.map((s, i) => { const prev = sem[i + 1]; const t = prev ? variacion(s.ventas, prev.ventas) : null;
+        return html`<div key=${s.semana} class=${'semana' + (i === 0 ? ' actual' : '')}>
+          <div class="sem-top"><b>${rangoSemana(s.semana)}${i === 0 ? ' · esta semana' : ''}</b>
+            ${t != null && html`<em class=${t >= 0 ? 'up' : 'down'}><${Icon} n=${t >= 0 ? 'up' : 'down'} size=${13} />${Math.abs(t)}%</em>`}</div>
+          <div class="sem-valor">${money(s.ventas)}</div>
+          <div class="sem-barra"><i style=${{ width: Math.max(2, (Number(s.ventas) / max) * 100) + '%' }}></i></div>
+          <div class="sem-meta"><span><b>${num(s.pedidos)}</b> pedidos</span><span><b>${num(s.canastas)}</b> canastas</span><span>Ticket <b>${money(s.ticket_promedio)}</b></span>${Number(s.cancelados) > 0 ? html`<span class="rojo"><b>${num(s.cancelados)}</b> ${Number(s.cancelados) === 1 ? 'cancelado' : 'cancelados'}</span>` : null}</div>
+        </div>`; })}</div>
       <a class="btn ghost block" href="#/estadisticas" onClick=${onClose}><${Icon} n="chart" size=${16} />Ver estadísticas completas</a>
     <//>`;
   }
@@ -141,4 +138,42 @@ function DetalleKpi({ tipo, d, onClose, onPedido }) {
   const ps = d.abiertos.filter((p) => p.pago_estado !== 'pagado').sort((a, b) => (Number(b.total) || 0) - (Number(a.total) || 0));
   return html`<${Modal} wide title=${'Por cobrar · ' + money(sum(ps, 'total'))} onClose=${onClose}>
     <p class="muted small">Pedidos abiertos que aún no tienen el pago verificado. Toca uno para registrar el pago.</p>${lista(ps)}<//>`;
+}
+
+const corta = (d) => d.toLocaleDateString('es-CO', { day: 'numeric', month: 'short' }).replace('.', '');
+/** "26 oct – 1 nov" a partir del lunes de la semana. */
+export function rangoSemana(lunes) {
+  const a = new Date(lunes + 'T12:00:00'), b = new Date(a); b.setDate(b.getDate() + 6);
+  return corta(a) + ' – ' + corta(b);
+}
+
+/** Ventas por semana: toca una barra para ver el detalle de esa semana. */
+function VentasSemana({ semanas, onVer }) {
+  const lista = [...semanas].reverse();
+  const [i, setI] = useState(lista.length - 1);
+  if (!lista.length) return html`<${Empty} icon="chart" title="Sin ventas todavía">Cuando entregues pedidos verás aquí las ventas de cada semana.<//>`;
+  const s = lista[i] || lista[lista.length - 1], prev = lista[i - 1];
+  const t = prev ? variacion(s.ventas, prev.ventas) : null;
+  const max = Math.max(1, ...lista.map((x) => Number(x.ventas) || 0));
+  const prom = lista.reduce((a, x) => a + (Number(x.ventas) || 0), 0) / lista.length;
+  return html`<div class="vsem">
+    <div class="vsem-head">
+      <span class="vsem-sem">${i === lista.length - 1 ? 'Esta semana' : 'Semana'} · ${rangoSemana(s.semana)}</span>
+      <div class="vsem-total"><${Contar} value=${money(s.ventas)} /></div>
+      <span class="vsem-cmp">${t == null ? 'Primera semana con datos' : html`<em class=${t >= 0 ? 'up' : 'down'}><${Icon} n=${t >= 0 ? 'up' : 'down'} size=${13} />${Math.abs(t)}%</em> frente a la semana anterior`}</span>
+    </div>
+    <div class="vsem-chart" role="group" aria-label="Ventas de las últimas semanas">
+      <div class="vsem-prom" style=${{ bottom: (prom / max) * 100 + '%' }}><span>Promedio ${money(Math.round(prom))}</span></div>
+      ${lista.map((x, j) => html`<button key=${x.semana} class=${'vsem-col' + (j === i ? ' on' : '')} onClick=${() => setI(j)} aria-label=${'Semana ' + rangoSemana(x.semana) + ': ' + money(x.ventas)}>
+        <span class="vsem-bar" style=${{ height: Math.max(3, (Number(x.ventas) / max) * 100) + '%', animationDelay: j * 40 + 'ms' }}></span>
+        <span class="vsem-lbl">${corta(new Date(x.semana + 'T12:00:00'))}</span></button>`)}
+    </div>
+    <p class="vsem-ayuda">Toca una barra para ver esa semana.</p>
+    <div class="vsem-stats">
+      <div><span>Pedidos</span><b>${num(s.pedidos)}</b></div>
+      <div><span>Canastas</span><b>${num(s.canastas)}</b></div>
+      <div><span>Ticket promedio</span><b>${money(s.ticket_promedio)}</b></div>
+      <div><span>Cancelados</span><b class=${Number(s.cancelados) ? 'rojo' : ''}>${num(s.cancelados)}</b></div>
+    </div>
+  </div>`;
 }
