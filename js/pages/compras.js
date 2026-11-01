@@ -19,13 +19,15 @@ const nombreMes = (m) => { const t = new Date(m + '-15T12:00:00').toLocaleDateSt
 
 export function Compras() {
   const r = useAsync(() => q(sb.from('gastos').select('*').order('fecha', { ascending: false }).order('id', { ascending: false }).limit(3000)), []);
-  const [mes, setMes] = useState(mesDe(hoyISO()));
+  const [mesSel, setMes] = useState(null);
   const [cat, setCat] = useState('');
   const [texto, setTexto] = useState('');
   const [editar, setEditar] = useState(null);
   const todos = r.data || [];
 
   const meses = useMemo(() => [...new Set([mesDe(hoyISO()), ...todos.map((g) => mesDe(g.fecha))])].sort().reverse(), [todos]);
+  const actual = mesDe(hoyISO());
+  const mes = mesSel || (todos.some((g) => mesDe(g.fecha) === actual) || !todos.length ? actual : mesDe(todos[0].fecha));
   const delMes = todos.filter((g) => mesDe(g.fecha) === mes);
   const mesAnt = (() => { const d = new Date(mes + '-15T12:00:00'); d.setMonth(d.getMonth() - 1); return d.toISOString().slice(0, 7); })();
   const totalAnt = sum(todos.filter((g) => mesDe(g.fecha) === mesAnt), 'total');
@@ -44,7 +46,7 @@ export function Compras() {
         <div class="chips scroll-x">${meses.map((m) => html`<button key=${m} class=${'chip-b' + (mes === m ? ' on' : '')} onClick=${() => { setMes(m); setCat(''); }}>${nombreMes(m)}</button>`)}</div></div>
 
       <div class="kpis three">
-        <${Kpi} icon="wallet" label=${'Gastado en ' + nombreMes(mes).split(' ')[0].toLowerCase()} value=${money(total)} sub=${cambio == null ? num(delMes.length) + ' compras' : cambio === 0 ? 'Igual que el mes anterior' : Math.abs(cambio) + '% ' + (cambio > 0 ? 'más' : 'menos') + ' que el mes anterior'} />
+        <${Kpi} icon="wallet" label=${'Gastado en ' + nombreMes(mes).split(' ')[0].toLowerCase()} value=${money(total)} sub=${!total ? 'Aún no hay compras este mes' : cambio == null ? num(delMes.length) + ' compras' : cambio === 0 ? 'Igual que el mes anterior' : Math.abs(cambio) + '% ' + (cambio > 0 ? 'más' : 'menos') + ' que el mes anterior'} />
         <${Kpi} icon="egg" label="Mayor gasto" value=${porCat[0] ? CATEGORIAS[porCat[0].k].l : '—'} sub=${porCat[0] ? money(porCat[0].v) : ''} tone="blue" />
         <${Kpi} icon="calendar" label="Compras registradas" value=${num(delMes.length)} sub="en el mes" tone="violet" />
       </div>

@@ -1314,7 +1314,7 @@ button.link { border: 0; background: none; padding: 0; font-family: inherit; cur
 }
 
 /* ===== Botón atrás ===== */
-.page-title { display: flex; align-items: center; gap: 10px; }
+@media (min-width: 861px) { .page-title { display: flex; align-items: center; gap: 10px; } }
 .icon-btn.atras { flex-shrink: 0; }
 .topbar-brand .atras { width: 38px; height: 38px; margin-right: 2px; }
 .drawer-atras { display: none; }
@@ -1325,4 +1325,14 @@ button.link { border: 0; background: none; padding: 0; font-family: inherit; cur
   .drawer-head > .icon-btn:last-child { display: none; }
   .drawer-head { justify-content: flex-start; padding: 14px 16px 12px; }
   .drawer-head h3 { font-size: 20px; }
+}
+@media (max-width: 860px) {
+  /* El título ya está en la barra superior: no repetirlo */
+  .page-head h2 { display: none; }
+  .page-head p { margin-top: 0; }
+}
+@media (max-width: 560px) {
+  /* Pestañas: que se vean todas, sin cortarse */
+  .tabs { flex-wrap: wrap; overflow: visible; }
+  .sticky-tabs .tabs { flex-wrap: nowrap; overflow-x: auto; }
 }
