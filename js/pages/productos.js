@@ -28,7 +28,7 @@ export function ProductoModal({ producto, onClose, onSaved }) {
     const pc = Math.round(((cambios.precio - base.precio) / base.precio) * 100);
     if (Math.abs(pc) >= 30) avisos.push(`El precio cambia ${pc > 0 ? '+' : ''}${pc}%. Revisa que no falte ni sobre un cero.`);
   }
-  if ('stock' in cambios && !nuevo) avisos.push('El stock se reemplaza (no se suma). Para entradas de mercancía usa "Registrar compra".');
+  if ('stock' in cambios && !nuevo) avisos.push('El stock se reemplaza (no se suma). Para sumar huevos nuevos usa "Registrar entrada".');
   if (cambios.activo === false) avisos.push('El producto deja de ofrecerse en el bot.');
 
   const errores = [];
@@ -60,7 +60,7 @@ export function ProductoModal({ producto, onClose, onSaved }) {
       <${Field} label="Nombre"><input class="input" value=${f.nombre} onInput=${set('nombre')} placeholder="Huevos AA" /><//>
       <${Field} label="Unidad"><input class="input" value=${f.unidad} onInput=${set('unidad')} placeholder="canasta" /><//>
       <${Field} label="Precio por unidad"><input class="input" type="number" min="0" step="500" value=${f.precio} onInput=${set('precio')} /><//>
-      <${Field} label="Stock disponible" hint=${nuevo ? '' : 'Para sumar mercancía usa Registrar compra'}><input class="input" type="number" min="0" step="1" value=${f.stock} onInput=${set('stock')} /><//>
+      <${Field} label="Stock disponible" hint=${nuevo ? '' : 'Para sumar huevos nuevos usa Registrar entrada'}><input class="input" type="number" min="0" step="1" value=${f.stock} onInput=${set('stock')} /><//>
     </div>
     <${Field} label="Descripción (la puede usar el bot)"><textarea class="input" rows="2" value=${f.descripcion || ''} onInput=${set('descripcion')}></textarea><//>
     <label class="switch"><input type="checkbox" checked=${!!f.activo} onChange=${set('activo')} /><span></span>Disponible para la venta</label>
@@ -68,7 +68,7 @@ export function ProductoModal({ producto, onClose, onSaved }) {
   <//>`;
 }
 
-/* ---------- Registrar compra (entrada de mercancía) ---------- */
+/* ---------- Entrada de huevos al inventario (producción de la finca) ---------- */
 export function CompraModal({ productos, productoId, onClose, onSaved }) {
   const [f, setF] = useState({ producto_id: productoId || productos[0]?.id || '', cantidad: '', costo_unitario: '', proveedor: '', notas: '' });
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
@@ -80,21 +80,21 @@ export function CompraModal({ productos, productoId, onClose, onSaved }) {
       costo_unitario: f.costo_unitario ? Number(f.costo_unitario) : null,
       proveedor: f.proveedor.trim() || null, notas: f.notas.trim() || null
     }));
-    toast(`Compra registrada: +${f.cantidad} ${p.nombre}`);
+    toast(`Entrada registrada: +${f.cantidad} ${p.nombre}`);
     if (p.en_lista_espera > 0) {
       try { await accion({ accion: 'lista_espera' }); toast('Se avisará a los clientes en lista de espera'); } catch (e) { /* la tarea diaria lo cubre */ }
     }
     onSaved(); onClose();
   };
-  return html`<${Modal} title="Registrar compra" onClose=${onClose}
+  return html`<${Modal} title="Entrada de huevos al inventario" onClose=${onClose}
     footer=${html`<button class="btn ghost" onClick=${onClose}>Cancelar</button>
       <${AsyncButton} className="btn primary" icon="plus" disabled=${!ok} onClick=${guardar}>Sumar ${f.cantidad || 0} al stock<//>`}>
     <div class="form-grid">
       <${Field} label="Producto"><select class="input" value=${f.producto_id} onChange=${set('producto_id')}>
         ${productos.map((x) => html`<option value=${x.id}>${x.nombre}</option>`)}</select><//>
-      <${Field} label="Cantidad"><input class="input" type="number" min="1" step="1" value=${f.cantidad} onInput=${set('cantidad')} /><//>
-      <${Field} label="Costo por unidad" hint="Sirve para calcular el margen"><input class="input" type="number" min="0" step="100" value=${f.costo_unitario} onInput=${set('costo_unitario')} /><//>
-      <${Field} label="Proveedor"><input class="input" value=${f.proveedor} onInput=${set('proveedor')} placeholder="Finca, galpón…" /><//>
+      <${Field} label="Canastas que entran"><input class="input" type="number" min="1" step="1" value=${f.cantidad} onInput=${set('cantidad')} /><//>
+      <${Field} label="Costo por canasta (opcional)" hint="Lo que te cuesta producirla. Sirve para calcular la ganancia"><input class="input" type="number" min="0" step="100" value=${f.costo_unitario} onInput=${set('costo_unitario')} /><//>
+      <${Field} label="De dónde vienen (opcional)"><input class="input" value=${f.proveedor} onInput=${set('proveedor')} placeholder="Finca, galpón 1…" /><//>
     </div>
     <${Field} label="Notas"><input class="input" value=${f.notas} onInput=${set('notas')} /><//>
     ${p && Number(f.cantidad) > 0 && html`<div class="info"><${Icon} n="box" size=${16} />Stock de ${p.nombre}: ${num(p.stock)} → <b>${num(Number(p.stock) + Number(f.cantidad))}</b>
@@ -113,7 +113,7 @@ export function Productos() {
 
   return html`<div class="stack">
     <div class="toolbar end">
-      <button class="btn" onClick=${() => setCompra({})} disabled=${!prods.length}><${Icon} n="cart" size=${16} />Registrar compra</button>
+      <button class="btn" onClick=${() => setCompra({})} disabled=${!prods.length}><${Icon} n="plus" size=${16} />Registrar entrada</button>
       <button class="btn primary" onClick=${() => setEdit({ nuevo: true })}><${Icon} n="plus" size=${16} />Nuevo producto</button>
     </div>
     <${ErrorBox} error=${r.error} onRetry=${r.reload} />
@@ -143,7 +143,7 @@ export function Productos() {
           </div>
           <div class="product-actions">
             <button class="btn sm ghost" onClick=${() => setEdit(p)}><${Icon} n="edit" size=${14} />Editar</button>
-            <button class="btn sm" onClick=${() => setCompra({ id: p.id })}><${Icon} n="plus" size=${14} />Compra</button>
+            <button class="btn sm" onClick=${() => setCompra({ id: p.id })}><${Icon} n="plus" size=${14} />Entrada</button>
           </div>
         </article>`;
       })}

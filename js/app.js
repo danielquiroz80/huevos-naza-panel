@@ -26,7 +26,7 @@ const TODAS = [
   { id: 'consejos', label: 'Consejos', icon: 'spark', C: Consejos, roles: ['dueno'] },
   { id: 'productos', label: 'Productos', icon: 'box', C: Productos, roles: ['dueno'] },
   { id: 'clientes', label: 'Clientes', icon: 'users', C: Clientes, roles: ['dueno'] },
-  { id: 'compras', label: 'Compras', icon: 'cart', C: Compras, roles: ['dueno'] },
+  { id: 'compras', label: 'Compras y gastos', icon: 'cart', C: Compras, roles: ['dueno'] },
   { id: 'estadisticas', label: 'Estadísticas', icon: 'chart', C: Estadisticas, roles: ['dueno'] },
   { id: 'planeacion', label: 'Planeación', icon: 'calendar', C: Planeacion, roles: ['dueno'] },
   { id: 'negocio', label: 'Administración', icon: 'store', C: Negocio, roles: ['dueno'] }
@@ -282,7 +282,7 @@ const GRUPOS_MAS = [
   { t: 'Ajustes', ids: ['negocio'] },
 ];
 const DESC_MAS = { reportes: 'Informes y descargas', consejos: 'Ideas para mejorar con IA', estadisticas: 'Ventas, clientes y barrios', productos: 'Precios e inventario',
-  clientes: 'Quién compra y qué', compras: 'Lo que le compras al proveedor', planeacion: 'Qué alistar la próxima semana', negocio: 'Zonas, equipo y configuración',
+  clientes: 'Quién compra y qué', compras: 'Canastas, gasolina, alimento y otros gastos', planeacion: 'Qué alistar la próxima semana', negocio: 'Zonas, equipo y configuración',
   repartidores: 'Equipo de reparto', pedidos: 'Todos los pedidos', entregas: 'Rutas y reparto', inicio: 'Resumen del día' };
 function MenuMas({ extras, actual, instalar, onInstalar, onClose }) {
   const arr = useArrastre(onClose);

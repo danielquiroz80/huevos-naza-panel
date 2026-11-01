@@ -1291,3 +1291,24 @@ button.link { border: 0; background: none; padding: 0; font-family: inherit; cur
 .periodo-res b { color: var(--ink); }
 .periodo .chips { gap: 8px; }
 .periodo .chip-b { padding: 8px 13px; }
+
+/* ===== Compras y gastos ===== */
+.gcat { display: grid; gap: 6px; }
+.gcat-fila { display: flex; align-items: center; gap: 12px; width: 100%; border: 1.5px solid transparent; background: none; padding: 8px; border-radius: 14px; cursor: pointer; font-family: inherit; color: var(--ink); text-align: left; transition: background .15s, transform .12s; }
+.gcat-fila:hover { background: var(--cream); }
+.gcat-fila:active { transform: scale(.98); }
+.gcat-fila.on { border-color: var(--ink); background: var(--cream); }
+.gcat-ico { width: 34px; height: 34px; border-radius: 11px; display: grid; place-items: center; color: #fff; flex-shrink: 0; }
+.gcat-ico.sm { width: 30px; height: 30px; border-radius: 10px; }
+.gcat-txt { flex: 1; min-width: 0; display: grid; gap: 3px; }
+.gcat-txt b { font-size: 14px; }
+.gcat-txt small { font-size: 12px; color: var(--muted); }
+.gcat-barra { display: block; height: 6px; border-radius: 99px; background: var(--gray-soft); overflow: hidden; }
+.gcat-barra i { display: block; height: 100%; border-radius: 99px; transform-origin: left; animation: crecer-x .6s var(--ease) both; }
+.gcat-val { font-size: 15px; white-space: nowrap; }
+.gcat-pick { display: flex; flex-wrap: wrap; gap: 6px; }
+.page-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+@media (max-width: 560px) {
+  .kpis.three { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .kpis.three > :first-child { grid-column: 1 / -1; }
+}
