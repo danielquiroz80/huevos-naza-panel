@@ -13,6 +13,7 @@ import { Negocio } from './pages/negocio.js';
 import { Entregas, MiRuta } from './pages/entregas.js';
 import { Repartidores } from './pages/repartidores.js';
 import { Reportes } from './pages/reportes.js';
+import { iniciarRastreo } from './rastreo.js';
 import { Consejos } from './pages/consejos.js';
 
 const TODAS = [
@@ -209,6 +210,7 @@ function MiCuenta({ perfil, onClose }) {
 
 /* ---------- Estructura principal ---------- */
 function Shell({ session, perfil }) {
+  useEffect(() => { if (perfil.rol === 'repartidor') iniciarRastreo(perfil.email); }, []);
   const rutas = TODAS.filter((r) => r.roles.includes(perfil.rol));
   const movil = MOVIL[perfil.rol] || [];
   const [ruta, setRuta] = useState(rutaActual(rutas));

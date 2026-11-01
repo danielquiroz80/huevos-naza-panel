@@ -537,7 +537,7 @@ const senal = (ru) => {
   if (ru.estado !== 'en_curso') return null;
   if (!ru.ultima_ubicacion_en) return ['no', 'Sin ubicación: pídele abrir la app'];
   const m = Math.round((Date.now() - new Date(ru.ultima_ubicacion_en)) / 60000);
-  return m <= 2 ? ['ok', 'En vivo'] : m <= 5 ? ['medio', 'Señal de hace ' + m + ' min'] : ['no', 'Sin señal hace ' + (m < 60 ? m + ' min' : Math.round(m / 60) + ' h')];
+  return m <= 2 ? ['ok', 'En vivo'] : m <= 5 ? ['medio', 'Señal de hace ' + m + ' min'] : ['no', 'Última ubicación hace ' + (m < 60 ? m + ' min' : Math.round(m / 60) + ' h') + ' (app cerrada o sin internet)'];
 };
 
 function EnVivo({ onVer, onPlanear, onPedidos, onRutas }) {
@@ -862,21 +862,14 @@ function RutaActiva({ perfil, rutaId, onDisponibles }) {
   const [yo, setYo] = useState(null);
   const [verDanos, setVerDanos] = useState(0);
 
-  // Mientras la ruta está en curso, el repartidor comparte su ubicación (solo con la app abierta).
+  // La ubicación la envía el rastreo general de la app (js/rastreo.js); aquí solo se muestra.
   const enCurso = r.data && r.data.ruta && r.data.ruta.estado === 'en_curso' && !gestor;
-  const ultimoEnvio = useRef(0);
   useEffect(() => {
-    if (!enCurso || !navigator.geolocation) return;
-    const id = navigator.geolocation.watchPosition((p) => {
-      const u = { lat: p.coords.latitude, lng: p.coords.longitude };
-      setYo(u);
-      if (Date.now() - ultimoEnvio.current > 15000) { ultimoEnvio.current = Date.now(); sb.rpc('panel_ubicacion', { p_lat: u.lat, p_lng: u.lng }).then(() => {}, () => {}); }
-    }, () => {}, { enableHighAccuracy: true, maximumAge: 10000, timeout: 20000 });
-    // Mantiene la pantalla encendida durante el recorrido para que la ubicación siga llegando.
-    let lock = null;
-    const pedir = () => { if (navigator.wakeLock && !document.hidden) navigator.wakeLock.request('screen').then((l) => { lock = l; }, () => {}); };
-    pedir(); document.addEventListener('visibilitychange', pedir);
-    return () => { navigator.geolocation.clearWatch(id); document.removeEventListener('visibilitychange', pedir); if (lock) lock.release().catch(() => {}); };
+    if (!enCurso) return;
+    window.dispatchEvent(new Event('naza-ruta-cambio'));
+    const f = (e) => setYo(e.detail);
+    window.addEventListener('naza-ubicacion', f);
+    return () => window.removeEventListener('naza-ubicacion', f);
   }, [enCurso]);
 
   if (r.loading && !r.data) return html`<${Loader} rows=${6} />`;
@@ -910,6 +903,7 @@ function RutaActiva({ perfil, rutaId, onDisponibles }) {
         ${['planeada', 'en_curso'].includes(ruta.estado) && html`<button class="btn-dano" onClick=${() => setDlg({ t: 'dano', pedido: actual && ruta.estado === 'en_curso' ? actual.id : '' })}><${Icon} n="egg" size=${16} />Huevos dañados</button>`}</div>
       <div class="ruta-ring" style=${{ '--p': pct }}><b>${pct}%</b></div>
     </section>
+    ${enCurso && html`<div class="info"><${Icon} n="pin" size=${16} /><span>La oficina ve tu ubicación mientras la app esté abierta. Si usas Waze o Google Maps, vuelve a la app al llegar a cada parada.</span></div>`}
 
     ${ruta.estado === 'planeada' && pendientes.length > 0 && html`<${PrepararRuta} ruta=${ruta} pendientes=${pendientes} gestor=${gestor} onCambio=${r.reload} onPedidos=${gestor ? null : () => setEditarPedidos(true)} />`}
 
